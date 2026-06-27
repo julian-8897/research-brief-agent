@@ -16,6 +16,10 @@ from src.models import (
 # Snippet length for abstracts returned inside search results, to keep tool
 # payloads (and therefore input tokens) bounded.
 _ABSTRACT_SNIPPET = 600
+_MIN_SEARCH_K = 1
+_MAX_SEARCH_K = 20
+_MIN_FETCH_RESULTS = 1
+_MAX_FETCH_RESULTS = 50
 
 
 class ResearchToolset:
@@ -162,17 +166,99 @@ class ResearchToolset:
     def call(self, tool_call: ToolCall) -> tuple[str, dict[str, Any]]:
         """Execute a tool call, returning (json_content, event_metadata)."""
         args = tool_call.arguments or {}
+        if not isinstance(args, dict):
+            return self._invalid_args("tool arguments must be a JSON object")
         if tool_call.name == "search_papers":
-            return self._search_papers(str(args.get("query", "")), int(args.get("k", 8)))
-        if tool_call.name == "fetch_arxiv":
-            return self._fetch_arxiv(
-                str(args.get("query", "")), int(args.get("max_results", 15))
+            query = self._string_arg(args, "query")
+            if query is None:
+                return self._invalid_args("query must be a non-empty string")
+            k = self._bounded_int_arg(
+                args,
+                "k",
+                default=8,
+                minimum=_MIN_SEARCH_K,
+                maximum=min(_MAX_SEARCH_K, self._tools.settings.max_retrieval_results),
             )
+            if k is None:
+                return self._invalid_args("k must be an integer")
+            return self._search_papers(query, k)
+        if tool_call.name == "fetch_arxiv":
+            query = self._string_arg(args, "query")
+            if query is None:
+                return self._invalid_args("query must be a non-empty string")
+            max_results = self._bounded_int_arg(
+                args,
+                "max_results",
+                default=15,
+                minimum=_MIN_FETCH_RESULTS,
+                maximum=min(_MAX_FETCH_RESULTS, self._tools.settings.max_ingest_results),
+            )
+            if max_results is None:
+                return self._invalid_args("max_results must be an integer")
+            return self._fetch_arxiv(query, max_results)
         if tool_call.name == "get_paper_details":
-            return self._get_paper_details(args.get("paper_ids", []))
+            paper_ids = self._paper_ids_arg(args)
+            if paper_ids is None:
+                return self._invalid_args("paper_ids must be an array of strings")
+            return self._get_paper_details(paper_ids)
         if tool_call.name == "get_full_text":
-            return self._get_full_text(args.get("paper_ids", []))
+            paper_ids = self._paper_ids_arg(args)
+            if paper_ids is None:
+                return self._invalid_args("paper_ids must be an array of strings")
+            return self._get_full_text(paper_ids)
         return json.dumps({"error": f"unknown tool '{tool_call.name}'"}), {}
+
+    @staticmethod
+    def _invalid_args(message: str) -> tuple[str, dict[str, Any]]:
+        return (
+            json.dumps({"error": "invalid_tool_arguments", "message": message}),
+            {"error": "invalid_tool_arguments"},
+        )
+
+    @staticmethod
+    def _string_arg(args: dict[str, Any], name: str) -> str | None:
+        value = args.get(name)
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        return value or None
+
+    @staticmethod
+    def _bounded_int_arg(
+        args: dict[str, Any],
+        name: str,
+        *,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int | None:
+        value = args.get(name, default)
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, str):
+            try:
+                parsed = int(value.strip())
+            except ValueError:
+                return None
+        else:
+            return None
+        return max(minimum, min(parsed, maximum))
+
+    @staticmethod
+    def _paper_ids_arg(args: dict[str, Any]) -> list[str] | None:
+        value = args.get("paper_ids")
+        if not isinstance(value, list):
+            return None
+        ids: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                return None
+            item = item.strip()
+            if item:
+                ids.append(item)
+        return ids
 
     def _search_papers(self, query: str, k: int) -> tuple[str, dict[str, Any]]:
         if not query:

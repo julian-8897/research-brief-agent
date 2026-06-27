@@ -136,3 +136,61 @@ def test_fetch_arxiv_reports_only_new_papers_and_stop_hint(monkeypatch):
     assert second_payload["new"] == 0
     assert second_payload["already_known"] == 1
     assert "Stop fetching" in second_payload["hint"]
+
+
+def test_toolset_rejects_malformed_tool_arguments():
+    toolset = _toolset_with_paper()
+
+    content, meta = toolset.call(
+        ToolCall(
+            id="bad-search",
+            name="search_papers",
+            arguments={"query": None, "k": "many"},
+        )
+    )
+    payload = json.loads(content)
+    assert meta == {"error": "invalid_tool_arguments"}
+    assert payload["error"] == "invalid_tool_arguments"
+    assert "query" in payload["message"]
+
+    content, meta = toolset.call(
+        ToolCall(
+            id="bad-full-text",
+            name="get_full_text",
+            arguments={"paper_ids": "2401.00001"},
+        )
+    )
+    payload = json.loads(content)
+    assert meta == {"error": "invalid_tool_arguments"}
+    assert payload["error"] == "invalid_tool_arguments"
+    assert "paper_ids" in payload["message"]
+
+
+def test_toolset_clamps_numeric_tool_arguments(monkeypatch):
+    toolset = _toolset_with_paper()
+
+    toolset.call(
+        ToolCall(
+            id="large-search",
+            name="search_papers",
+            arguments={"query": "grounding", "k": 10_000},
+        )
+    )
+    assert toolset.diagnostics().requested_k == 20
+
+    captured = {}
+
+    def fake_fetch_and_ingest(query, max_results, date_range=None):
+        captured["max_results"] = max_results
+        return 0, []
+
+    monkeypatch.setattr(toolset._tools, "fetch_and_ingest", fake_fetch_and_ingest)
+
+    toolset.call(
+        ToolCall(
+            id="large-fetch",
+            name="fetch_arxiv",
+            arguments={"query": "all:grounding", "max_results": 10_000},
+        )
+    )
+    assert captured["max_results"] == 50
