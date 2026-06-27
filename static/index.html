@@ -1,0 +1,1255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>arXiv Research Brief Agent</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7f9;
+        --panel: #ffffff;
+        --panel-soft: #f9fafb;
+        --ink: #1f252d;
+        --muted: #65707d;
+        --line: #d9dee5;
+        --line-strong: #b8c0cc;
+        --accent: #167c80;
+        --accent-dark: #0e5d62;
+        --green: #25744f;
+        --amber: #916b12;
+        --red: #b42318;
+        --blue: #2f5f9f;
+        --shadow: 0 1px 2px rgba(24, 32, 42, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.58;
+      }
+
+      a {
+        color: var(--blue);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      .app-shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      header {
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .topbar {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 16px 20px;
+        display: grid;
+        grid-template-columns: minmax(260px, 1fr) auto;
+        gap: 18px;
+        align-items: center;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.2;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .health-strip {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(92px, auto));
+        gap: 8px;
+        align-items: stretch;
+      }
+
+      .pill {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 7px;
+        padding: 8px 10px;
+        min-width: 0;
+      }
+
+      .pill span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.1;
+      }
+
+      .pill strong {
+        display: block;
+        margin-top: 3px;
+        font-size: 13px;
+        line-height: 1.2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      main {
+        max-width: 1480px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 18px 20px 28px;
+        display: grid;
+        grid-template-columns: 390px minmax(0, 1fr);
+        gap: 18px;
+      }
+
+      .left-rail {
+        display: grid;
+        align-content: start;
+        gap: 14px;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 14px;
+        min-width: 0;
+      }
+
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+      }
+
+      .panel-head {
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .panel-head h2 {
+        margin: 0;
+        font-size: 15px;
+        letter-spacing: 0;
+      }
+
+      .panel-body {
+        padding: 14px;
+      }
+
+      .form-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .inline-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      label {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 5px;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+        padding: 9px 10px;
+        outline: none;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(22, 124, 128, 0.12);
+      }
+
+      textarea {
+        min-height: 96px;
+        resize: vertical;
+        line-height: 1.4;
+      }
+
+      .compact-textarea {
+        min-height: 70px;
+      }
+
+      .primary-button,
+      .secondary-button {
+        min-height: 38px;
+        border-radius: 6px;
+        padding: 9px 12px;
+        font-weight: 750;
+      }
+
+      .primary-button {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .primary-button:hover {
+        background: var(--accent-dark);
+      }
+
+      .secondary-button {
+        background: #eef2f6;
+        color: var(--ink);
+        border: 1px solid var(--line);
+      }
+
+      .secondary-button:hover {
+        background: #e5ebf2;
+      }
+
+      .status-line {
+        color: var(--muted);
+        font-size: 12px;
+        min-height: 18px;
+      }
+
+      .status-line.error {
+        color: var(--red);
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 10px;
+        min-width: 0;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 15px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .run-grid {
+        display: grid;
+        grid-template-columns: minmax(290px, 0.42fr) minmax(0, 0.58fr);
+        gap: 14px;
+        min-height: 560px;
+      }
+
+      .timeline,
+      .memo-pane {
+        min-height: 0;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+
+      .scroll-region {
+        overflow: auto;
+        padding: 14px;
+      }
+
+      .event-list {
+        display: grid;
+        gap: 9px;
+      }
+
+      .event-item {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        background: var(--panel-soft);
+      }
+
+      .event-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .event-name {
+        font-size: 13px;
+        font-weight: 750;
+      }
+
+      .event-detail {
+        margin-top: 6px;
+        color: var(--muted);
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 750;
+        background: #e9eef4;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .tag.turn {
+        color: var(--blue);
+        background: #eaf1fb;
+      }
+
+      .tag.tool {
+        color: var(--accent-dark);
+        background: #e7f3f3;
+      }
+
+      .tag.result {
+        color: var(--green);
+        background: #e9f4ee;
+      }
+
+      .tag.guard {
+        color: var(--amber);
+        background: #fff5dd;
+      }
+
+      .tag.final {
+        color: #ffffff;
+        background: var(--green);
+      }
+
+      .paper-list,
+      .citation-list,
+      .warning-list,
+      .diagnostic-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .paper-row,
+      .citation-row,
+      .warning-row,
+      .diagnostic-row {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        background: var(--panel-soft);
+      }
+
+      .paper-title,
+      .citation-title {
+        font-size: 13px;
+        font-weight: 750;
+        line-height: 1.35;
+      }
+
+      .paper-meta,
+      .citation-meta {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .paper-summary {
+        margin-top: 8px;
+        color: #39414c;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 6px;
+        padding: 8px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .tab-button {
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        border-radius: 6px;
+        padding: 7px 9px;
+        font-weight: 750;
+      }
+
+      .tab-button.active {
+        border-color: var(--line);
+        background: var(--panel-soft);
+        color: var(--ink);
+      }
+
+      .tab-page {
+        display: none;
+      }
+
+      .tab-page.active {
+        display: block;
+      }
+
+      .memo {
+        color: #20242a;
+        line-height: 1.58;
+        overflow-wrap: anywhere;
+      }
+
+      .memo h1,
+      .memo h2,
+      .memo h3 {
+        margin: 18px 0 8px;
+        line-height: 1.25;
+        letter-spacing: 0;
+      }
+
+      .memo h1 {
+        font-size: 24px;
+      }
+
+      .memo h2 {
+        font-size: 18px;
+      }
+
+      .memo h3 {
+        font-size: 15px;
+      }
+
+      .memo p {
+        margin: 0 0 10px;
+      }
+
+      .memo ul {
+        margin: 0 0 12px 20px;
+        padding: 0;
+      }
+
+      .memo li {
+        margin: 4px 0;
+      }
+
+      .memo code {
+        background: #eef2f6;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 1px 4px;
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          monospace;
+        font-size: 0.92em;
+      }
+
+      .empty-state {
+        color: var(--muted);
+        font-size: 13px;
+        padding: 4px 0;
+      }
+
+      .split-list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      @media (max-width: 1180px) {
+        .health-strip {
+          grid-template-columns: repeat(3, minmax(92px, 1fr));
+        }
+
+        main {
+          grid-template-columns: 360px minmax(0, 1fr);
+        }
+
+        .metric-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .run-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 860px) {
+        .topbar,
+        main {
+          grid-template-columns: 1fr;
+        }
+
+        .health-strip,
+        .metric-grid,
+        .split-list {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 560px) {
+        .topbar,
+        main {
+          padding-left: 12px;
+          padding-right: 12px;
+        }
+
+        .health-strip,
+        .metric-grid,
+        .inline-grid,
+        .split-list {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header>
+        <div class="topbar">
+          <div>
+            <h1>arXiv Research Brief Agent</h1>
+            <div class="subtitle">Corpus ingest, retrieval preview, live agent run, cited memo.</div>
+          </div>
+          <div class="health-strip" aria-live="polite">
+            <div class="pill"><span>Status</span><strong id="health-status">checking</strong></div>
+            <div class="pill"><span>Store</span><strong id="health-store">-</strong></div>
+            <div class="pill"><span>Papers</span><strong id="health-papers">-</strong></div>
+            <div class="pill"><span>LLM</span><strong id="health-llm">-</strong></div>
+            <div class="pill"><span>Trace</span><strong id="health-trace">-</strong></div>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <div class="left-rail">
+          <section>
+            <div class="panel-head">
+              <h2>Corpus</h2>
+              <button id="refresh-health" class="secondary-button" type="button">Refresh</button>
+            </div>
+            <div class="panel-body">
+              <form id="ingest-form" class="form-grid">
+                <div>
+                  <label for="ingest-query">arXiv query</label>
+                  <textarea id="ingest-query" class="compact-textarea" required>cat:cs.LG AND all:retrieval augmented generation</textarea>
+                </div>
+                <div class="inline-grid">
+                  <div>
+                    <label for="ingest-count">Max papers</label>
+                    <input id="ingest-count" type="number" min="1" max="500" value="25" />
+                  </div>
+                  <div>
+                    <label for="ingest-start">Start date</label>
+                    <input id="ingest-start" type="date" />
+                  </div>
+                </div>
+                <div>
+                  <label for="ingest-end">End date</label>
+                  <input id="ingest-end" type="date" />
+                </div>
+                <button id="ingest-submit" class="primary-button" type="submit">Ingest Papers</button>
+                <div id="ingest-status" class="status-line"></div>
+              </form>
+            </div>
+          </section>
+
+          <section>
+            <div class="panel-head">
+              <h2>Search Preview</h2>
+            </div>
+            <div class="panel-body">
+              <form id="search-form" class="form-grid">
+                <div>
+                  <label for="search-query">Query</label>
+                  <textarea id="search-query" class="compact-textarea" required>RAG factual grounding hallucination reduction</textarea>
+                </div>
+                <div>
+                  <label for="search-k">Results</label>
+                  <input id="search-k" type="number" min="1" max="50" value="8" />
+                </div>
+                <button id="search-submit" class="secondary-button" type="submit">Search Corpus</button>
+                <div id="search-status" class="status-line"></div>
+              </form>
+            </div>
+          </section>
+
+          <section>
+            <div class="panel-head">
+              <h2>Agent Run</h2>
+            </div>
+            <div class="panel-body">
+              <form id="brief-form" class="form-grid">
+                <div>
+                  <label for="question">Research question</label>
+                  <textarea id="question" required>What RAG methods improve factual grounding, and what are their tradeoffs?</textarea>
+                </div>
+                <div class="inline-grid">
+                  <div>
+                    <label for="domain">Domain</label>
+                    <input id="domain" value="cs.LG" />
+                  </div>
+                  <div>
+                    <label for="max-papers">Max papers</label>
+                    <input id="max-papers" type="number" min="1" max="50" value="6" />
+                  </div>
+                </div>
+                <div>
+                  <label for="brief-type">Brief type</label>
+                  <select id="brief-type">
+                    <option value="decision_memo">Decision memo</option>
+                    <option value="technical_brief">Technical brief</option>
+                    <option value="literature_scan">Literature scan</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="constraints">Constraints</label>
+                  <textarea id="constraints" class="compact-textarea">Prefer methods with measurable citation grounding.
+Track latency, cost, and operational risks.</textarea>
+                </div>
+                <button id="brief-submit" class="primary-button" type="submit">Run Agent</button>
+                <div id="brief-status" class="status-line"></div>
+              </form>
+            </div>
+          </section>
+        </div>
+
+        <div class="workspace">
+          <section>
+            <div class="panel-body">
+              <div class="metric-grid">
+                <div class="metric"><span>Run state</span><strong id="metric-state">idle</strong></div>
+                <div class="metric"><span>Latency</span><strong id="metric-latency">-</strong></div>
+                <div class="metric"><span>LLM calls</span><strong id="metric-llm">-</strong></div>
+                <div class="metric"><span>Tool calls</span><strong id="metric-tools">-</strong></div>
+                <div class="metric"><span>Tokens</span><strong id="metric-tokens">-</strong></div>
+                <div class="metric"><span>Cost</span><strong id="metric-cost">-</strong></div>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <div class="tabs" role="tablist" aria-label="Workspace views">
+              <button class="tab-button active" data-tab="timeline" type="button">Timeline</button>
+              <button class="tab-button" data-tab="search" type="button">Search Results</button>
+              <button class="tab-button" data-tab="evidence" type="button">Evidence</button>
+              <button class="tab-button" data-tab="diagnostics" type="button">Diagnostics</button>
+            </div>
+            <div class="panel-body">
+              <div id="tab-timeline" class="tab-page active">
+                <div class="event-list" id="timeline-list">
+                  <div class="empty-state">No run events yet.</div>
+                </div>
+              </div>
+              <div id="tab-search" class="tab-page">
+                <div class="paper-list" id="search-results">
+                  <div class="empty-state">No search results yet.</div>
+                </div>
+              </div>
+              <div id="tab-evidence" class="tab-page">
+                <div class="split-list">
+                  <div>
+                    <div class="citation-list" id="citation-list">
+                      <div class="empty-state">No cited papers yet.</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="warning-list" id="warning-list">
+                      <div class="empty-state">No warnings yet.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div id="tab-diagnostics" class="tab-page">
+                <div class="diagnostic-list" id="diagnostic-list">
+                  <div class="empty-state">No diagnostics yet.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="memo-pane">
+            <div class="panel-head">
+              <h2>Final Memo</h2>
+              <span class="tag final" id="memo-tag">waiting</span>
+            </div>
+            <div class="scroll-region">
+              <article id="memo" class="memo">
+                <div class="empty-state">Run the agent to generate a memo.</div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const $ = (selector) => document.querySelector(selector);
+      const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+      const state = {
+        health: null,
+        final: null,
+        running: false,
+        eventCounts: {
+          llm_turn: 0,
+          tool_call: 0,
+          tool_result: 0
+        }
+      };
+
+      const elements = {
+        healthStatus: $("#health-status"),
+        healthStore: $("#health-store"),
+        healthPapers: $("#health-papers"),
+        healthLlm: $("#health-llm"),
+        healthTrace: $("#health-trace"),
+        ingestForm: $("#ingest-form"),
+        ingestSubmit: $("#ingest-submit"),
+        ingestStatus: $("#ingest-status"),
+        searchForm: $("#search-form"),
+        searchSubmit: $("#search-submit"),
+        searchStatus: $("#search-status"),
+        searchResults: $("#search-results"),
+        briefForm: $("#brief-form"),
+        briefSubmit: $("#brief-submit"),
+        briefStatus: $("#brief-status"),
+        timeline: $("#timeline-list"),
+        memo: $("#memo"),
+        memoTag: $("#memo-tag"),
+        citations: $("#citation-list"),
+        warnings: $("#warning-list"),
+        diagnostics: $("#diagnostic-list"),
+        metricState: $("#metric-state"),
+        metricLatency: $("#metric-latency"),
+        metricLlm: $("#metric-llm"),
+        metricTools: $("#metric-tools"),
+        metricTokens: $("#metric-tokens"),
+        metricCost: $("#metric-cost")
+      };
+
+      function setBusy(button, busy, label) {
+        button.disabled = busy;
+        if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent;
+        button.textContent = busy ? label : button.dataset.idleLabel;
+      }
+
+      function setStatus(node, text, isError = false) {
+        node.textContent = text || "";
+        node.classList.toggle("error", isError);
+      }
+
+      function dateRange(start, end) {
+        if (!start && !end) return null;
+        return {start: start || null, end: end || null};
+      }
+
+      function formatMs(value) {
+        if (!Number.isFinite(value)) return "-";
+        if (value < 1000) return `${Math.round(value)} ms`;
+        return `${(value / 1000).toFixed(1)} s`;
+      }
+
+      function formatMoney(value) {
+        if (!Number.isFinite(value)) return "-";
+        return `$${value.toFixed(5)}`;
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      async function readJsonOrText(response) {
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await response.json();
+          if (!response.ok) {
+            const detail = Array.isArray(data.detail)
+              ? data.detail.map((item) => item.msg || JSON.stringify(item)).join("; ")
+              : data.detail || JSON.stringify(data);
+            throw new Error(detail);
+          }
+          return data;
+        }
+        const text = await response.text();
+        if (!response.ok) {
+          throw new Error(text || `HTTP ${response.status}`);
+        }
+        return text;
+      }
+
+      function inlineMarkdown(value) {
+        return escapeHtml(value)
+          .replace(/`([^`]+)`/g, "<code>$1</code>")
+          .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+          .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+      }
+
+      function renderMarkdown(text) {
+        const lines = String(text || "").split(/\r?\n/);
+        const html = [];
+        let listOpen = false;
+
+        function closeList() {
+          if (listOpen) {
+            html.push("</ul>");
+            listOpen = false;
+          }
+        }
+
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (!line) {
+            closeList();
+            continue;
+          }
+          if (line.startsWith("### ")) {
+            closeList();
+            html.push(`<h3>${inlineMarkdown(line.slice(4))}</h3>`);
+          } else if (line.startsWith("## ")) {
+            closeList();
+            html.push(`<h2>${inlineMarkdown(line.slice(3))}</h2>`);
+          } else if (line.startsWith("# ")) {
+            closeList();
+            html.push(`<h1>${inlineMarkdown(line.slice(2))}</h1>`);
+          } else if (line.startsWith("- ") || line.startsWith("* ")) {
+            if (!listOpen) {
+              html.push("<ul>");
+              listOpen = true;
+            }
+            html.push(`<li>${inlineMarkdown(line.slice(2))}</li>`);
+          } else if (/^\d+\.\s/.test(line)) {
+            if (!listOpen) {
+              html.push("<ul>");
+              listOpen = true;
+            }
+            html.push(`<li>${inlineMarkdown(line.replace(/^\d+\.\s/, ""))}</li>`);
+          } else if (line === "---") {
+            closeList();
+            html.push("<hr />");
+          } else {
+            closeList();
+            html.push(`<p>${inlineMarkdown(line)}</p>`);
+          }
+        }
+        closeList();
+        return html.join("");
+      }
+
+      async function loadHealth() {
+        try {
+          const response = await fetch("/health");
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          state.health = await response.json();
+          elements.healthStatus.textContent = state.health.status || "ok";
+          elements.healthStore.textContent = state.health.retrieval_backend || "-";
+          elements.healthPapers.textContent = String(state.health.papers_indexed ?? "-");
+          elements.healthLlm.textContent = state.health.llm_provider || "-";
+          elements.healthTrace.textContent = state.health.langfuse_enabled ? "on" : "off";
+        } catch (error) {
+          elements.healthStatus.textContent = "offline";
+          elements.healthStore.textContent = "-";
+          elements.healthPapers.textContent = "-";
+          elements.healthLlm.textContent = "-";
+          elements.healthTrace.textContent = "-";
+        }
+      }
+
+      async function ingestCorpus(event) {
+        event.preventDefault();
+        setBusy(elements.ingestSubmit, true, "Ingesting");
+        setStatus(elements.ingestStatus, "Submitting ingest job...");
+        try {
+          const payload = {
+            query: $("#ingest-query").value.trim(),
+            max_papers: Number($("#ingest-count").value),
+            date_range: dateRange($("#ingest-start").value, $("#ingest-end").value)
+          };
+          const data = await ingestWithDateFallback(payload);
+          const fallbackNote = data._dateFallback ? " Date range was removed after arXiv rejected the filtered query." : "";
+          setStatus(
+            elements.ingestStatus,
+            `Ingested ${data.ingested} papers into ${data.retrieval_backend} in ${formatMs(data.latency_ms)}.${fallbackNote}`
+          );
+          await loadHealth();
+        } catch (error) {
+          setStatus(elements.ingestStatus, error.message, true);
+        } finally {
+          setBusy(elements.ingestSubmit, false);
+        }
+      }
+
+      async function postIngest(payload) {
+        const response = await fetch("/ingest", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload)
+        });
+        return readJsonOrText(response);
+      }
+
+      async function ingestWithDateFallback(payload) {
+        try {
+          return await postIngest(payload);
+        } catch (error) {
+          if (!payload.date_range || !String(error.message).includes("arXiv API request failed")) {
+            throw error;
+          }
+          setStatus(
+            elements.ingestStatus,
+            "Date-filtered arXiv query failed; retrying without date range..."
+          );
+          const retryPayload = {...payload, date_range: null};
+          const data = await postIngest(retryPayload);
+          $("#ingest-start").value = "";
+          $("#ingest-end").value = "";
+          data._dateFallback = true;
+          return data;
+        }
+      }
+
+      async function searchCorpus(event) {
+        event.preventDefault();
+        setBusy(elements.searchSubmit, true, "Searching");
+        setStatus(elements.searchStatus, "Searching corpus...");
+        elements.searchResults.innerHTML = '<div class="empty-state">Searching...</div>';
+        try {
+          const query = $("#search-query").value.trim();
+          const k = Number($("#search-k").value);
+          const response = await fetch(`/papers/search?query=${encodeURIComponent(query)}&k=${encodeURIComponent(k)}`);
+          const data = await readJsonOrText(response);
+          setStatus(elements.searchStatus, `${data.results.length} results in ${formatMs(data.retrieval_latency_ms)}.`);
+          renderSearchResults(data.results);
+          activateTab("search");
+        } catch (error) {
+          setStatus(elements.searchStatus, error.message, true);
+          elements.searchResults.innerHTML = '<div class="empty-state">Search failed.</div>';
+        } finally {
+          setBusy(elements.searchSubmit, false);
+        }
+      }
+
+      function renderSearchResults(results) {
+        if (!results.length) {
+          elements.searchResults.innerHTML = '<div class="empty-state">No matching papers.</div>';
+          return;
+        }
+        elements.searchResults.innerHTML = results.map((item) => {
+          const paper = item.paper;
+          const score = Number.isFinite(item.score) ? item.score.toFixed(3) : "-";
+          const url = paper.arxiv_url || `https://arxiv.org/abs/${encodeURIComponent(paper.id)}`;
+          return `
+            <div class="paper-row">
+              <div class="paper-title"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(paper.title)}</a></div>
+              <div class="paper-meta">${escapeHtml(paper.id)} | score ${escapeHtml(score)} | ${escapeHtml(paper.primary_category || "uncategorized")}</div>
+              <div class="paper-summary">${escapeHtml((paper.summary || "").slice(0, 420))}</div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      function resetRun() {
+        state.final = null;
+        state.running = true;
+        state.eventCounts = {llm_turn: 0, tool_call: 0, tool_result: 0};
+        elements.timeline.innerHTML = "";
+        elements.memo.innerHTML = '<div class="empty-state">Run in progress.</div>';
+        elements.memoTag.textContent = "running";
+        elements.citations.innerHTML = '<div class="empty-state">No cited papers yet.</div>';
+        elements.warnings.innerHTML = '<div class="empty-state">No warnings yet.</div>';
+        elements.diagnostics.innerHTML = '<div class="empty-state">No diagnostics yet.</div>';
+        elements.metricState.textContent = "running";
+        elements.metricLatency.textContent = "-";
+        elements.metricLlm.textContent = "0";
+        elements.metricTools.textContent = "0";
+        elements.metricTokens.textContent = "-";
+        elements.metricCost.textContent = "-";
+        activateTab("timeline");
+      }
+
+      async function runBrief(event) {
+        event.preventDefault();
+        resetRun();
+        setBusy(elements.briefSubmit, true, "Running");
+        setStatus(elements.briefStatus, "Streaming agent events...");
+        try {
+          const payload = {
+            research_question: $("#question").value.trim(),
+            domain: $("#domain").value.trim() || null,
+            constraints: $("#constraints").value.split("\n").map((item) => item.trim()).filter(Boolean),
+            max_papers: Number($("#max-papers").value),
+            brief_type: $("#brief-type").value
+          };
+          const response = await fetch("/briefs/stream", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || `HTTP ${response.status}`);
+          }
+          await readEventStream(response);
+        } catch (error) {
+          setStatus(elements.briefStatus, error.message, true);
+          addTimelineEvent({event: "error", message: error.message});
+          elements.metricState.textContent = "error";
+          elements.memoTag.textContent = "error";
+        } finally {
+          state.running = false;
+          setBusy(elements.briefSubmit, false);
+          await loadHealth();
+        }
+      }
+
+      async function readEventStream(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const {value, done} = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, {stream: true});
+          const chunks = buffer.split("\n\n");
+          buffer = chunks.pop();
+          for (const chunk of chunks) {
+            const lines = chunk.split("\n").filter((line) => line.startsWith("data: "));
+            for (const line of lines) {
+              const eventData = JSON.parse(line.slice(6));
+              handleStreamEvent(eventData);
+            }
+          }
+        }
+      }
+
+      function handleStreamEvent(eventData) {
+        addTimelineEvent(eventData);
+        if (eventData.event === "llm_turn") {
+          state.eventCounts.llm_turn += 1;
+          elements.metricLlm.textContent = String(state.eventCounts.llm_turn);
+        }
+        if (eventData.event === "tool_call") {
+          state.eventCounts.tool_call += 1;
+          elements.metricTools.textContent = String(state.eventCounts.tool_call);
+        }
+        if (eventData.event === "synthesis_complete") {
+          elements.metricState.textContent = "synthesizing";
+        }
+        if (eventData.event === "evidence_required") {
+          elements.metricState.textContent = "reading required";
+        }
+        if (eventData.event === "degraded") {
+          elements.metricState.textContent = "degraded";
+        }
+        if (eventData.event === "error") {
+          elements.metricState.textContent = "error";
+        }
+        if (eventData.event === "final") {
+          renderFinal(eventData.data);
+        }
+      }
+
+      function eventTag(eventName) {
+        if (eventName === "llm_turn") return "turn";
+        if (eventName === "tool_call") return "tool";
+        if (eventName === "tool_result") return "result";
+        if (eventName === "discovery_budget_reached") return "guard";
+        if (eventName === "evidence_required") return "guard";
+        if (eventName === "degraded") return "guard";
+        if (eventName === "error") return "guard";
+        if (eventName === "final") return "final";
+        return "";
+      }
+
+      function describeEvent(eventData) {
+        if (eventData.event === "started") return eventData.message || "Run started.";
+        if (eventData.event === "llm_turn") {
+          const tools = eventData.tools_requested && eventData.tools_requested.length
+            ? eventData.tools_requested.join(", ")
+            : "none";
+          return `turn ${eventData.turn}; requested: ${tools}`;
+        }
+        if (eventData.event === "tool_call") {
+          return `${eventData.name}\n${JSON.stringify(eventData.arguments || {}, null, 2)}`;
+        }
+        if (eventData.event === "tool_result") {
+          const meta = {...eventData};
+          delete meta.event;
+          delete meta.name;
+          return `${eventData.name}\n${JSON.stringify(meta, null, 2)}`;
+        }
+        if (eventData.event === "discovery_budget_reached") return "Discovery tools withdrawn.";
+        if (eventData.event === "evidence_required") {
+          return `${eventData.message || "Full-text evidence required."}\nCandidates: ${(eventData.candidate_ids || []).join(", ") || "none"}`;
+        }
+        if (eventData.event === "degraded") return eventData.message || "Run degraded.";
+        if (eventData.event === "synthesis_complete") return `LLM calls: ${eventData.llm_calls}`;
+        if (eventData.event === "final") return "Final response received.";
+        if (eventData.event === "error") return eventData.message || "Error.";
+        return JSON.stringify(eventData, null, 2);
+      }
+
+      function addTimelineEvent(eventData) {
+        const empty = elements.timeline.querySelector(".empty-state");
+        if (empty) empty.remove();
+        const item = document.createElement("div");
+        item.className = "event-item";
+        item.innerHTML = `
+          <div class="event-top">
+            <div class="event-name">${escapeHtml(eventData.event)}</div>
+            <span class="tag ${eventTag(eventData.event)}">${escapeHtml(eventData.name || eventData.event)}</span>
+          </div>
+          <div class="event-detail">${escapeHtml(describeEvent(eventData))}</div>
+        `;
+        elements.timeline.appendChild(item);
+        item.scrollIntoView({block: "nearest"});
+      }
+
+      function renderFinal(data) {
+        state.final = data;
+        const usage = data.token_cost_estimate || {};
+        const diagnostics = data.retrieval_diagnostics || {};
+        elements.metricState.textContent = "complete";
+        elements.metricLatency.textContent = formatMs(data.latency_ms);
+        elements.metricLlm.textContent = String(usage.llm_call_count ?? state.eventCounts.llm_turn);
+        elements.metricTools.textContent = String(usage.tool_call_count ?? state.eventCounts.tool_call);
+        elements.metricTokens.textContent = `${usage.input_tokens || 0} / ${usage.output_tokens || 0}`;
+        elements.metricCost.textContent = formatMoney(Number(usage.estimated_cost_usd || 0));
+        elements.memoTag.textContent = "complete";
+        elements.memo.innerHTML = renderMarkdown(data.final_brief || "");
+        setStatus(elements.briefStatus, `Completed in ${formatMs(data.latency_ms)}.`);
+        renderCitations(data.cited_papers || []);
+        renderWarnings(data.warnings || []);
+        renderDiagnostics(diagnostics, usage, data.langfuse_trace_url);
+      }
+
+      function renderCitations(citations) {
+        if (!citations.length) {
+          elements.citations.innerHTML = '<div class="empty-state">No cited papers.</div>';
+          return;
+        }
+        elements.citations.innerHTML = citations.map((paper) => {
+          const score = Number.isFinite(paper.score) ? paper.score.toFixed(3) : "-";
+          const url = paper.arxiv_url || `https://arxiv.org/abs/${encodeURIComponent(paper.id)}`;
+          return `
+            <div class="citation-row">
+              <div class="citation-title"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(paper.title)}</a></div>
+              <div class="citation-meta">${escapeHtml(paper.id)} | score ${escapeHtml(score)}</div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      function renderWarnings(warnings) {
+        if (!warnings.length) {
+          elements.warnings.innerHTML = '<div class="empty-state">No warnings.</div>';
+          return;
+        }
+        elements.warnings.innerHTML = warnings.map((warning) => `
+          <div class="warning-row">${escapeHtml(warning)}</div>
+        `).join("");
+      }
+
+      function renderDiagnostics(diagnostics, usage, traceUrl) {
+        const rows = [
+          ["Query", diagnostics.query || "-"],
+          ["Requested k", diagnostics.requested_k ?? "-"],
+          ["Returned", diagnostics.returned ?? "-"],
+          ["Retrieval latency", formatMs(diagnostics.retrieval_latency_ms)],
+          ["Score range", `${diagnostics.min_score ?? "-"} to ${diagnostics.max_score ?? "-"}`],
+          ["Input tokens", usage.input_tokens ?? 0],
+          ["Output tokens", usage.output_tokens ?? 0],
+          ["Trace", traceUrl ? `<a href="${escapeHtml(traceUrl)}" target="_blank" rel="noreferrer">open trace</a>` : "-"]
+        ];
+        elements.diagnostics.innerHTML = rows.map(([label, value]) => `
+          <div class="diagnostic-row">
+            <div class="paper-meta">${escapeHtml(label)}</div>
+            <div class="paper-title">${String(value).startsWith("<a ") ? value : escapeHtml(value)}</div>
+          </div>
+        `).join("");
+      }
+
+      function activateTab(name) {
+        $$(".tab-button").forEach((button) => {
+          button.classList.toggle("active", button.dataset.tab === name);
+        });
+        $$(".tab-page").forEach((page) => {
+          page.classList.toggle("active", page.id === `tab-${name}`);
+        });
+      }
+
+      $$(".tab-button").forEach((button) => {
+        button.addEventListener("click", () => activateTab(button.dataset.tab));
+      });
+      $("#refresh-health").addEventListener("click", loadHealth);
+      elements.ingestForm.addEventListener("submit", ingestCorpus);
+      elements.searchForm.addEventListener("submit", searchCorpus);
+      elements.briefForm.addEventListener("submit", runBrief);
+
+      loadHealth();
+    </script>
+  </body>
+</html>

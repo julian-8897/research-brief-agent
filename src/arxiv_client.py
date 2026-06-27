@@ -5,7 +5,7 @@ Provides ArxivClient for searching and retrieving papers from arXiv.
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, List
+from typing import Any
 
 import arxiv
 import pandas as pd
@@ -20,12 +20,30 @@ class ArxivClient:
         """Initializes the arXiv API client."""
         self.client = arxiv.Client()
 
+    @staticmethod
+    def normalize_result(result: Any) -> dict:
+        """Convert an arxiv.Result into the service paper payload."""
+        paper_id = result.entry_id.split("/")[-1]
+        return {
+            "id": paper_id,
+            "title": result.title.strip(),
+            "summary": result.summary.strip(),
+            "authors": [author.name for author in result.authors],
+            "published": result.published,
+            "updated": result.updated,
+            "categories": list(result.categories or []),
+            "primary_category": result.primary_category,
+            "pdf_url": result.pdf_url,
+            "arxiv_url": f"https://arxiv.org/abs/{paper_id}",
+            "links": [link.href for link in result.links],
+        }
+
     def search_papers(
         self,
         query: str = "cat:astro-ph.GA",
         max_results: int = 100,
         sort_by: arxiv.SortCriterion = arxiv.SortCriterion.SubmittedDate,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Search arXiv for papers matching a query.
 
@@ -39,27 +57,9 @@ class ArxivClient:
         """
         search = arxiv.Search(query=query, max_results=max_results, sort_by=sort_by)
 
-        papers = []
-        for result in self.client.results(search):
-            paper_id = result.entry_id.split("/")[-1]
-            paper = {
-                "id": paper_id,
-                "title": result.title,
-                "summary": result.summary,
-                "authors": [author.name for author in result.authors],
-                "published": result.published,
-                "updated": result.updated,
-                "categories": result.categories,
-                "primary_category": result.primary_category,
-                "pdf_url": result.pdf_url,
-                "arxiv_url": f"https://arxiv.org/abs/{paper_id}",
-                "links": [link.href for link in result.links],
-            }
-            papers.append(paper)
+        return [self.normalize_result(result) for result in self.client.results(search)]
 
-        return papers
-
-    def get_recent_papers(self, category: str = "cs.AI", days: int = 7) -> List[Dict]:
+    def get_recent_papers(self, category: str = "cs.AI", days: int = 7) -> list[dict]:
         """
         Get recent papers from a specific category.
 
@@ -76,7 +76,7 @@ class ArxivClient:
         query = f"cat:{category} AND submittedDate:[{start_date.strftime('%Y%m%d')}* TO {end_date.strftime('%Y%m%d')}*]"
         return self.search_papers(query=query, max_results=50)
 
-    def papers_to_dataframe(self, papers: List[Dict]) -> pd.DataFrame:
+    def papers_to_dataframe(self, papers: list[dict]) -> pd.DataFrame:
         """
         Convert papers list to pandas DataFrame.
 

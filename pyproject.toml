@@ -2,48 +2,66 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.poetry]
-package-mode = false
-
 [project]
-name = "arxiv-llm"
+name = "arxiv-research-brief-agent"
 version = "0.1.0"
-description = "An AI-powered semantic search tool for arXiv papers"
+description = "A production-style arXiv research brief agent with streaming FastAPI, Qdrant retrieval, Claude synthesis, and evals"
 readme = "README.md"
 authors = [{ name = "Julian Chan", email = "julianchan8897@gmail.com" }]
 license = { text = "MIT" }
-requires-python = ">=3.9,!=3.9.7"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "streamlit>=1.28.0",
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
     "arxiv>=1.4.0",
     "pandas>=1.5.0",
     "sentence-transformers>=2.2.0",
     "numpy>=1.21.0",
-    "faiss-cpu>=1.7.0",
+    "qdrant-client>=1.9.0",
+    "anthropic>=0.34.0",
+    "openai>=1.40.0",
+    "langfuse>=2.40.0",
+    "httpx>=0.27.0",
+    "pypdf>=4.0.0",
+    "python-dotenv>=1.0.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "flake8>=6.0.0",
     "pytest>=7.0.0",
+    "httpx>=0.27.0",
     "pytest-cov>=4.0.0",
+    "ruff>=0.9.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/julian-8897/arxiv-llm"
-Repository = "https://github.com/julian-8897/arxiv-llm.git"
-Issues = "https://github.com/julian-8897/arxiv-llm/issues"
+Homepage = "https://github.com/julian-8897/arxiv-research-brief-agent"
+Repository = "https://github.com/julian-8897/arxiv-research-brief-agent.git"
+Issues = "https://github.com/julian-8897/arxiv-research-brief-agent/issues"
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"evals/run_eval.py" = ["E402"]
+"scripts/run_arxiv_search.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

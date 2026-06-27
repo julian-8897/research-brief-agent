@@ -1,7 +1,11 @@
-from typing import Dict, List
-
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+
+def build_paper_embedding_text(paper: dict) -> str:
+    """Build the SPECTER-style title/abstract input used for paper indexing."""
+    title = str(paper.get("title", "")).strip()
+    summary = str(paper.get("summary", "")).strip()
+    return f"Title: {title}\nAbstract: {summary}".strip()
 
 
 class TextEmbedder:
@@ -24,9 +28,19 @@ class TextEmbedder:
             model_name (str): Name of the sentence transformer model to use.
         """
         self.model_name = model_name
-        self.model = SentenceTransformer(self.model_name)
+        self._model = None
 
-    def encode_texts(self, texts: List[str], batch_size: int = 32) -> np.ndarray:
+    @property
+    def model(self):
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self.model_name)
+        return self._model
+
+    def encode_texts(
+        self, texts: list[str], batch_size: int = 32, show_progress_bar: bool = False
+    ) -> np.ndarray:
         """
         Encodes a list of texts into embeddings.
 
@@ -38,12 +52,15 @@ class TextEmbedder:
             np.ndarray: Array of embeddings for the input texts.
         """
         embeddings = self.model.encode(
-            texts, batch_size=batch_size, show_progress_bar=True, convert_to_numpy=True
+            texts,
+            batch_size=batch_size,
+            show_progress_bar=show_progress_bar,
+            convert_to_numpy=True,
         )
 
         return embeddings
 
-    def encode_papers(self, papers: List[Dict], field: str = "title") -> np.ndarray:
+    def encode_papers(self, papers: list[dict], field: str = "title") -> np.ndarray:
         """
         Encodes papers into embeddings based on the specified field.
 
@@ -62,11 +79,7 @@ class TextEmbedder:
         elif field == "summary":
             texts = [paper["summary"] for paper in papers]
         elif field == "title_summary":
-            # Structured concatenation
-            texts = [
-                f"Title: {paper['title']}\nAbstract: {paper['summary']}"
-                for paper in papers
-            ]
+            texts = [build_paper_embedding_text(paper) for paper in papers]
         else:
             raise ValueError("field must be 'title', 'summary', or 'title_summary'")
 
