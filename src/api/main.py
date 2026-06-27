@@ -73,7 +73,7 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
         yield
 
     service_app = FastAPI(
-        title="arXiv Research Brief Agent",
+        title="Research Brief Agent",
         version="0.1.0",
         description="LLM-powered cited research briefs over persistent arXiv retrieval.",
         lifespan=lifespan,

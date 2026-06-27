@@ -1,6 +1,6 @@
 # Project Progress
 
-Living status tracker for the arXiv Research Brief Agent. Update this as work lands.
+Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-06-27_
 

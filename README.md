@@ -1,4 +1,4 @@
-# arXiv Research Brief Agent
+# Research Brief Agent
 
 A production-style research brief service for applied science teams. A user submits a research question, the service retrieves relevant arXiv papers, reads full text for promising candidates when available, and streams back a cited decision memo with methods, baselines, risks, uncertainty, next steps, latency, and estimated cost.
 

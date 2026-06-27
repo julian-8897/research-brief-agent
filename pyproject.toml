@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "arxiv-research-brief-agent"
+name = "research-brief-agent"
 version = "0.1.0"
-description = "A production-style arXiv research brief agent with streaming FastAPI, Qdrant retrieval, Claude synthesis, and evals"
+description = "A production-style research brief agent with streaming FastAPI, Qdrant retrieval, arXiv literature tools, LLM synthesis, and evals"
 readme = "README.md"
 authors = [{ name = "Julian Chan", email = "julianchan8897@gmail.com" }]
 license = { text = "MIT" }
@@ -46,9 +46,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/julian-8897/arxiv-research-brief-agent"
-Repository = "https://github.com/julian-8897/arxiv-research-brief-agent.git"
-Issues = "https://github.com/julian-8897/arxiv-research-brief-agent/issues"
+Homepage = "https://github.com/julian-8897/research-brief-agent"
+Repository = "https://github.com/julian-8897/research-brief-agent.git"
+Issues = "https://github.com/julian-8897/research-brief-agent/issues"
 
 [tool.ruff]
 line-length = 88

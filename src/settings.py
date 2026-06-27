@@ -36,7 +36,7 @@ def _float_env(name: str, default: float) -> float:
 
 @dataclass(frozen=True)
 class Settings:
-    app_name: str = os.getenv("APP_NAME", "arxiv-research-brief-agent")
+    app_name: str = os.getenv("APP_NAME", "research-brief-agent")
     environment: str = os.getenv("ENVIRONMENT", "local")
 
     # Synthesis backend: "anthropic" (native Claude) or "openai"

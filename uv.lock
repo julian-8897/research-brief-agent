@@ -83,7 +83,7 @@ wheels = [
 ]
 
 [[package]]
-name = "arxiv-research-brief-agent"
+name = "research-brief-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
