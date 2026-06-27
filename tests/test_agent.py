@@ -282,8 +282,9 @@ def test_discovery_tools_withdrawn_after_search_budget(monkeypatch):
         "get_paper_details",
         "get_full_text",
     ]
-    assert provider.offered_tool_names[1] == ["get_paper_details", "get_full_text"]
-    assert provider.offered_tool_names[2] == ["get_paper_details", "get_full_text"]
+    assert provider.offered_tool_names[1] == ["get_full_text"]
+    assert provider.offered_tool_names[2] == ["get_full_text"]
+    assert provider.offered_tool_names[3] == ["get_paper_details", "get_full_text"]
 
 
 def test_agent_blocks_final_until_full_text_read(monkeypatch):

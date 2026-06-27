@@ -123,14 +123,19 @@ class ResearchBriefAgent:
         try:
             for turn_index in range(1, self.settings.agent_max_iterations + 1):
                 if discovery_budget_reached and not discovery_budget_event_emitted:
-                    messages.append(UserMessage(_DISCOVERY_BUDGET_NUDGE))
+                    messages.append(UserMessage(self._discovery_budget_nudge(toolset)))
                     yield {"event": "discovery_budget_reached"}
                     discovery_budget_event_emitted = True
                 offered_tools = (
-                    toolset.read_only_specs
+                    toolset.full_text_specs
+                    if discovery_budget_reached and self._needs_full_text(toolset)
+                    else toolset.details_specs
+                    if discovery_budget_reached and toolset.fulltext_budget_reached
+                    else toolset.read_only_specs
                     if discovery_budget_reached
                     else toolset.specs
                 )
+                offered_tool_names = {tool.name for tool in offered_tools}
                 with self.tracer.span(trace, "llm_turn", turn=turn_index):
                     turn = self._run_llm_turn(
                         system, messages, offered_tools, stage="llm_turn"
@@ -162,11 +167,13 @@ class ResearchBriefAgent:
                         "name": call.name,
                         "arguments": call.arguments,
                     }
-                    if discovery_budget_reached and is_discovery_call:
+                    if call.name not in offered_tool_names:
                         content = json.dumps(
                             {
-                                "error": "discovery budget reached",
-                                "hint": _DISCOVERY_BUDGET_NUDGE,
+                                "error": "tool not available",
+                                "available_tools": sorted(offered_tool_names),
+                                "candidate_ids": toolset.candidate_ids(),
+                                "hint": self._discovery_budget_nudge(toolset),
                             }
                         )
                         meta = {"blocked": True}
@@ -181,7 +188,7 @@ class ResearchBriefAgent:
                 if discovery_calls >= self.settings.agent_max_search_calls:
                     discovery_budget_reached = True
                     if not discovery_budget_event_emitted:
-                        messages.append(UserMessage(_DISCOVERY_BUDGET_NUDGE))
+                        messages.append(UserMessage(self._discovery_budget_nudge(toolset)))
                         yield {"event": "discovery_budget_reached"}
                         discovery_budget_event_emitted = True
 
@@ -291,6 +298,16 @@ class ResearchBriefAgent:
     def _needs_full_text(toolset: ResearchToolset) -> bool:
         required = min(_MIN_FULL_TEXT_PAPERS, toolset.retrieved_count)
         return required > 0 and toolset.fulltext_success_count < required
+
+    @staticmethod
+    def _discovery_budget_nudge(toolset: ResearchToolset) -> str:
+        candidate_ids = toolset.candidate_ids(limit=3)
+        if not candidate_ids:
+            return _DISCOVERY_BUDGET_NUDGE
+        return (
+            f"{_DISCOVERY_BUDGET_NUDGE} Call get_full_text with one or more of "
+            f"these exact paper ids: {', '.join(candidate_ids)}."
+        )
 
     @staticmethod
     def _evidence_required_event(toolset: ResearchToolset) -> dict[str, Any]:

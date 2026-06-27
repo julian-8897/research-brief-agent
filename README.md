@@ -77,7 +77,7 @@ Environment variables are documented in [.env.example](.env.example). Key settin
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (Claude backend)
 - `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` (OpenAI-compatible backend)
 - `AGENT_MAX_ITERATIONS`, `AGENT_MAX_SEARCH_CALLS`, `AGENT_MAX_TOOL_CALLS` (agent loop budgets)
-- `FULL_TEXT_CHAR_BUDGET`, `FULL_TEXT_MAX_PAPERS`, `FULL_TEXT_TIMEOUT_S` (full-text tool limits)
+- `FULL_TEXT_CHAR_BUDGET`, `FULL_TEXT_MAX_PAPERS`, `FULL_TEXT_TOTAL_PAPER_BUDGET`, `FULL_TEXT_TIMEOUT_S` (full-text tool limits)
 - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`
 
 ## Evaluation
@@ -115,7 +115,7 @@ uv run uvicorn src.api.main:app --reload
 Current verification:
 
 ```text
-32 passed, 1 warning; ruff clean
+36 passed, 1 warning; ruff clean
 ```
 
 ## Project Structure

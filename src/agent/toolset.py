@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from src.agent.tools import ResearchTools
@@ -20,6 +21,7 @@ _MIN_SEARCH_K = 1
 _MAX_SEARCH_K = 20
 _MIN_FETCH_RESULTS = 1
 _MAX_FETCH_RESULTS = 50
+_ARXIV_VERSION_SUFFIX = re.compile(r"v\d+$")
 
 
 class ResearchToolset:
@@ -63,6 +65,14 @@ class ResearchToolset:
             self._get_paper_details_spec(),
             self._get_full_text_spec(),
         ]
+
+    @property
+    def full_text_specs(self) -> list[ToolSpec]:
+        return [self._get_full_text_spec()]
+
+    @property
+    def details_specs(self) -> list[ToolSpec]:
+        return [self._get_paper_details_spec()]
 
     @staticmethod
     def _search_papers_spec() -> ToolSpec:
@@ -304,15 +314,39 @@ class ResearchToolset:
         return json.dumps(payload), {"new": len(new)}
 
     def _get_paper_details(self, paper_ids: Any) -> tuple[str, dict[str, Any]]:
-        ids = [str(pid) for pid in paper_ids] if isinstance(paper_ids, list) else []
+        ids, missing = self._resolve_paper_ids(paper_ids)
         items = [self._retrieved[pid] for pid in ids if pid in self._retrieved]
         evidence = self._tools.extract_evidence(items)
-        return json.dumps({"evidence": evidence}), {"count": len(evidence)}
+        payload: dict[str, Any] = {"evidence": evidence}
+        if missing:
+            payload["missing"] = missing
+            payload["available_ids"] = self.candidate_ids()
+            payload["hint"] = (
+                "Use the exact paper ids returned by search_papers. If you need "
+                "paper body evidence, call get_full_text with available_ids."
+            )
+        return json.dumps(payload), {"count": len(evidence)}
 
     def _get_full_text(self, paper_ids: Any) -> tuple[str, dict[str, Any]]:
         settings = self._tools.settings
-        ids = [str(pid) for pid in paper_ids] if isinstance(paper_ids, list) else []
-        ids = ids[: settings.full_text_max_papers]
+        ids, missing = self._resolve_paper_ids(paper_ids)
+        remaining_budget = max(
+            0, settings.full_text_total_paper_budget - self.fulltext_success_count
+        )
+        if remaining_budget <= 0:
+            return (
+                json.dumps(
+                    {
+                        "papers": [],
+                        "hint": (
+                            "Full-text paper budget is already met. Stop calling "
+                            "get_full_text and write the memo from the evidence read."
+                        ),
+                    }
+                ),
+                {"fetched": 0, "budget_exhausted": True},
+            )
+        ids = ids[: min(settings.full_text_max_papers, remaining_budget)]
         papers: list[dict[str, Any]] = []
         fetched = 0
         for pid in ids:
@@ -351,7 +385,39 @@ class ResearchToolset:
                     "full_text": text,
                 }
             )
-        return json.dumps({"papers": papers}), {"fetched": fetched}
+        payload: dict[str, Any] = {"papers": papers}
+        if missing:
+            payload["missing"] = missing
+            payload["available_ids"] = self.candidate_ids()
+        return json.dumps(payload), {"fetched": fetched}
+
+    def _resolve_paper_ids(self, paper_ids: Any) -> tuple[list[str], list[str]]:
+        ids = [str(pid).strip() for pid in paper_ids] if isinstance(paper_ids, list) else []
+        resolved: list[str] = []
+        missing: list[str] = []
+        for pid in ids:
+            if not pid:
+                continue
+            resolved_id = self._resolve_paper_id(pid)
+            if resolved_id is None:
+                missing.append(pid)
+            else:
+                resolved.append(resolved_id)
+        return resolved, missing
+
+    def _resolve_paper_id(self, paper_id: str) -> str | None:
+        if paper_id in self._retrieved:
+            return paper_id
+        requested_base = _ARXIV_VERSION_SUFFIX.sub("", paper_id)
+        candidates = [
+            item
+            for item in self._retrieved.values()
+            if _ARXIV_VERSION_SUFFIX.sub("", item.paper.id) == requested_base
+        ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item.score, reverse=True)
+        return candidates[0].paper.id
 
     # -- Post-run reporting ---------------------------------------------------
 
@@ -372,10 +438,20 @@ class ResearchToolset:
         return self._fulltext_error_count
 
     @property
+    def fulltext_budget_reached(self) -> bool:
+        return (
+            self.fulltext_success_count
+            >= self._tools.settings.full_text_total_paper_budget
+        )
+
+    @property
     def retrieved_items(self) -> list[SearchResponseItem]:
         items = list(self._retrieved.values())
         items.sort(key=lambda item: item.score, reverse=True)
         return items
+
+    def candidate_ids(self, limit: int = 5) -> list[str]:
+        return [item.paper.id for item in self.retrieved_items[:limit]]
 
     def cited_papers(self, brief_text: str) -> list[CitedPaper]:
         """Papers whose id appears in the final brief, falling back to all retrieved."""

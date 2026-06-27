@@ -48,14 +48,15 @@ class Settings:
 
     # Agent loop guardrails: bound how many model turns and tool calls a single
     # brief may consume so latency and cost stay predictable.
-    agent_max_iterations: int = _int_env("AGENT_MAX_ITERATIONS", 6)
+    agent_max_iterations: int = _int_env("AGENT_MAX_ITERATIONS", 8)
     agent_max_tool_calls: int = _int_env("AGENT_MAX_TOOL_CALLS", 12)
-    agent_max_search_calls: int = _int_env("AGENT_MAX_SEARCH_CALLS", 4)
+    agent_max_search_calls: int = _int_env("AGENT_MAX_SEARCH_CALLS", 3)
 
-    # Full-text evidence tool: how much paper body the agent may pull per paper
-    # and how many papers per call, plus the PDF fetch timeout.
+    # Full-text evidence tool: how much paper body the agent may pull per paper,
+    # how many papers per call and per run, plus the PDF fetch timeout.
     full_text_char_budget: int = _int_env("FULL_TEXT_CHAR_BUDGET", 12000)
     full_text_max_papers: int = _int_env("FULL_TEXT_MAX_PAPERS", 3)
+    full_text_total_paper_budget: int = _int_env("FULL_TEXT_TOTAL_PAPER_BUDGET", 3)
     full_text_timeout_s: float = _float_env("FULL_TEXT_TIMEOUT_S", 20.0)
 
     anthropic_api_key: str | None = os.getenv("ANTHROPIC_API_KEY")
