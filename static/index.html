@@ -4,36 +4,86 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Research Brief Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
-        color-scheme: light;
-        --bg: #f5f7f9;
-        --panel: #ffffff;
-        --panel-soft: #f9fafb;
-        --ink: #1f252d;
-        --muted: #65707d;
-        --line: #d9dee5;
-        --line-strong: #b8c0cc;
-        --accent: #167c80;
-        --accent-dark: #0e5d62;
-        --green: #25744f;
-        --amber: #916b12;
-        --red: #b42318;
-        --blue: #2f5f9f;
-        --shadow: 0 1px 2px rgba(24, 32, 42, 0.08);
+        color-scheme: dark;
+
+        --ground: #0b121b;
+        --ground-2: #0e1824;
+        --panel: #111d29;
+        --panel-2: #15222f;
+        --field: #16242f;
+        --sub: #142231;
+        --line: #233340;
+        --line-soft: #1a2733;
+
+        --text: #e7eef4;
+        --muted: #90a1b1;
+        --faint: #61768a;
+
+        --signal: #f5a623;
+        --signal-hi: #ffce7a;
+        --signal-deep: #c9810f;
+        --signal-glow: rgba(245, 166, 35, 0.16);
+
+        --blue: #7fa8db;
+        --teal: #54b8a7;
+        --green: #8fc46d;
+        --amber: #e0a93f;
+        --coral: #e9715b;
+
+        --paper: #f1ebdd;
+        --paper-2: #e8e0cd;
+        --paper-line: #d6cab0;
+        --paper-ink: #23262b;
+        --paper-muted: #6f6a5c;
+        --paper-link: #a35a16;
+
+        --sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system,
+          BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --serif: "Fraunces", Georgia, "Times New Roman", serif;
+        --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+          Consolas, "Liberation Mono", monospace;
+
+        --radius: 14px;
+        --radius-sm: 9px;
       }
 
       * {
         box-sizing: border-box;
       }
 
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+
       body {
         margin: 0;
-        background: var(--bg);
-        color: var(--ink);
-        font-family:
-          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", sans-serif;
+        min-height: 100vh;
+        background: var(--ground);
+        background-image:
+          radial-gradient(
+            900px 520px at 88% -8%,
+            rgba(245, 166, 35, 0.08),
+            transparent 60%
+          ),
+          radial-gradient(
+            760px 460px at -6% 4%,
+            rgba(84, 184, 167, 0.06),
+            transparent 58%
+          ),
+          linear-gradient(180deg, var(--ground-2), var(--ground) 40%);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 15px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
       }
 
       button,
@@ -41,6 +91,7 @@
       select,
       textarea {
         font: inherit;
+        color: inherit;
       }
 
       button {
@@ -50,150 +101,329 @@
 
       button:disabled {
         cursor: not-allowed;
-        opacity: 0.58;
+        opacity: 0.5;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 2px;
       }
 
       a {
-        color: var(--blue);
+        color: var(--signal-hi);
         text-decoration: none;
+        text-underline-offset: 2px;
       }
 
       a:hover {
         text-decoration: underline;
       }
 
-      .app-shell {
+      .mono {
+        font-family: var(--mono);
+      }
+
+      /* ---------- shell ---------- */
+
+      .shell {
         min-height: 100vh;
         display: grid;
         grid-template-rows: auto 1fr;
       }
 
-      header {
-        background: var(--panel);
+      /* ---------- masthead ---------- */
+
+      .masthead {
+        position: sticky;
+        top: 0;
+        z-index: 20;
         border-bottom: 1px solid var(--line);
+        background: linear-gradient(
+          180deg,
+          rgba(13, 21, 31, 0.92),
+          rgba(11, 18, 27, 0.78)
+        );
+        backdrop-filter: blur(10px);
       }
 
-      .topbar {
+      .masthead::before {
+        content: "";
+        display: block;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          var(--signal-deep),
+          var(--signal) 30%,
+          transparent 62%
+        );
+      }
+
+      .masthead-inner {
         max-width: 1480px;
         margin: 0 auto;
-        padding: 16px 20px;
-        display: grid;
-        grid-template-columns: minmax(260px, 1fr) auto;
-        gap: 18px;
+        padding: 14px 22px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px 24px;
         align-items: center;
+        justify-content: space-between;
       }
 
-      h1 {
-        margin: 0;
-        font-size: 22px;
-        line-height: 1.2;
-        letter-spacing: 0;
-      }
-
-      .subtitle {
-        margin-top: 3px;
-        color: var(--muted);
-        font-size: 13px;
-      }
-
-      .health-strip {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(92px, auto));
-        gap: 8px;
-        align-items: stretch;
-      }
-
-      .pill {
-        border: 1px solid var(--line);
-        background: var(--panel-soft);
-        border-radius: 7px;
-        padding: 8px 10px;
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
         min-width: 0;
       }
 
-      .pill span {
-        display: block;
-        color: var(--muted);
-        font-size: 11px;
+      .brand-lamp {
+        position: relative;
+        width: 11px;
+        height: 11px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--signal);
+        box-shadow: 0 0 0 4px var(--signal-glow);
+      }
+
+      .brand-lamp::after {
+        content: "";
+        position: absolute;
+        inset: -4px;
+        border-radius: 50%;
+        border: 1px solid rgba(245, 166, 35, 0.4);
+        animation: lampPulse 2.6s ease-out infinite;
+      }
+
+      @keyframes lampPulse {
+        0% {
+          transform: scale(0.7);
+          opacity: 0.8;
+        }
+        100% {
+          transform: scale(2.1);
+          opacity: 0;
+        }
+      }
+
+      .brand-text {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .brand-eyebrow {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--signal);
+      }
+
+      .brand-name {
+        margin: 0;
+        font-size: 19px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
         line-height: 1.1;
       }
 
-      .pill strong {
-        display: block;
-        margin-top: 3px;
-        font-size: 13px;
-        line-height: 1.2;
+      .pipeline {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding-left: 18px;
+        margin-left: 4px;
+        border-left: 1px solid var(--line);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+
+      .pipeline i {
+        color: var(--signal-deep);
+        font-style: normal;
+      }
+
+      .readouts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .readout {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 13px 7px 11px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(20, 33, 45, 0.6);
+      }
+
+      .readout-lamp {
+        width: 7px;
+        height: 7px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--faint);
+        box-shadow: 0 0 0 3px rgba(97, 118, 138, 0.12);
+      }
+
+      .readout.live .readout-lamp {
+        background: var(--green);
+        box-shadow: 0 0 0 3px rgba(143, 196, 109, 0.16);
+      }
+
+      .readout.warn .readout-lamp {
+        background: var(--signal);
+        box-shadow: 0 0 0 3px var(--signal-glow);
+      }
+
+      .readout.down .readout-lamp {
+        background: var(--coral);
+        box-shadow: 0 0 0 3px rgba(233, 113, 91, 0.16);
+      }
+
+      .readout-meta {
+        display: grid;
+        gap: 1px;
+        line-height: 1.15;
+      }
+
+      .readout-label {
+        font-size: 9.5px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+
+      .readout-meta strong {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        font-weight: 500;
+        max-width: 140px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      main {
+      /* ---------- console layout ---------- */
+
+      .console {
         max-width: 1480px;
         width: 100%;
         margin: 0 auto;
-        padding: 18px 20px 28px;
+        padding: 22px;
         display: grid;
-        grid-template-columns: 390px minmax(0, 1fr);
-        gap: 18px;
+        grid-template-columns: 372px minmax(0, 1fr);
+        gap: 20px;
+        align-items: start;
       }
 
-      .left-rail {
+      .rail {
         display: grid;
         align-content: start;
-        gap: 14px;
+        gap: 16px;
+        position: sticky;
+        top: 92px;
       }
 
       .workspace {
         display: grid;
-        grid-template-rows: auto auto minmax(0, 1fr);
-        gap: 14px;
+        gap: 16px;
         min-width: 0;
       }
 
-      section {
+      /* ---------- cards ---------- */
+
+      .card {
+        position: relative;
         background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 8px;
-        box-shadow: var(--shadow);
+        border-radius: var(--radius);
+        box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.02) inset,
+          0 18px 40px -28px rgba(0, 0, 0, 0.8);
       }
 
-      .panel-head {
-        padding: 13px 14px;
-        border-bottom: 1px solid var(--line);
+      .card-head {
         display: flex;
+        align-items: flex-end;
         justify-content: space-between;
-        gap: 12px;
-        align-items: center;
+        gap: 14px;
+        padding: 15px 17px 13px;
+        border-bottom: 1px solid var(--line-soft);
       }
 
-      .panel-head h2 {
+      .card-title {
+        display: grid;
+        gap: 3px;
+      }
+
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: var(--signal);
+      }
+
+      .card-title h2 {
         margin: 0;
-        font-size: 15px;
-        letter-spacing: 0;
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
       }
 
-      .panel-body {
-        padding: 14px;
+      .card-body {
+        padding: 16px 17px 18px;
       }
+
+      .ghost-btn {
+        align-self: center;
+        padding: 6px 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        transition:
+          color 0.15s ease,
+          border-color 0.15s ease;
+      }
+
+      .ghost-btn:hover {
+        color: var(--text);
+        border-color: var(--faint);
+      }
+
+      /* ---------- forms ---------- */
 
       .form-grid {
         display: grid;
-        gap: 10px;
+        gap: 13px;
       }
 
       .inline-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 10px;
+        gap: 12px;
       }
 
       label {
         display: block;
+        margin-bottom: 6px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 500;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
         color: var(--muted);
-        font-size: 12px;
-        font-weight: 700;
-        margin-bottom: 5px;
       }
 
       input,
@@ -201,247 +431,191 @@
       textarea {
         width: 100%;
         border: 1px solid var(--line);
-        border-radius: 6px;
-        background: #fff;
-        color: var(--ink);
-        padding: 9px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--field);
+        color: var(--text);
+        padding: 10px 12px;
         outline: none;
+        transition:
+          border-color 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+
+      input::placeholder,
+      textarea::placeholder {
+        color: var(--faint);
+      }
+
+      input:hover,
+      select:hover,
+      textarea:hover {
+        border-color: var(--faint);
       }
 
       input:focus,
       select:focus,
       textarea:focus {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 3px rgba(22, 124, 128, 0.12);
+        border-color: var(--signal);
+        box-shadow: 0 0 0 3px var(--signal-glow);
       }
 
       textarea {
-        min-height: 96px;
+        min-height: 92px;
         resize: vertical;
-        line-height: 1.4;
+        line-height: 1.5;
       }
 
       .compact-textarea {
-        min-height: 70px;
+        min-height: 64px;
       }
 
       .primary-button,
       .secondary-button {
-        min-height: 38px;
-        border-radius: 6px;
-        padding: 9px 12px;
-        font-weight: 750;
+        min-height: 42px;
+        border-radius: var(--radius-sm);
+        padding: 10px 14px;
+        font-weight: 600;
+        font-size: 14px;
+        letter-spacing: 0.01em;
+        transition:
+          background 0.15s ease,
+          transform 0.05s ease,
+          box-shadow 0.15s ease;
       }
 
       .primary-button {
-        background: var(--accent);
-        color: #fff;
+        background: linear-gradient(180deg, var(--signal-hi), var(--signal));
+        color: #2a1a02;
+        box-shadow: 0 10px 24px -14px rgba(245, 166, 35, 0.9);
       }
 
       .primary-button:hover {
-        background: var(--accent-dark);
+        background: linear-gradient(180deg, #ffd98c, var(--signal-deep));
+      }
+
+      .primary-button:active {
+        transform: translateY(1px);
       }
 
       .secondary-button {
-        background: #eef2f6;
-        color: var(--ink);
+        background: var(--sub);
+        color: var(--text);
         border: 1px solid var(--line);
       }
 
       .secondary-button:hover {
-        background: #e5ebf2;
+        border-color: var(--faint);
+        background: #182838;
       }
 
       .status-line {
-        color: var(--muted);
-        font-size: 12px;
         min-height: 18px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        line-height: 1.45;
+        color: var(--muted);
       }
 
       .status-line.error {
-        color: var(--red);
+        color: var(--coral);
       }
 
-      .metric-grid {
+      /* ---------- telemetry gauges ---------- */
+
+      .telemetry .card-body {
+        padding: 6px 6px;
+      }
+
+      .gauge-cluster {
         display: grid;
         grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: 10px;
       }
 
-      .metric {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: var(--panel);
-        padding: 10px;
+      .gauge {
+        padding: 13px 16px;
+        border-left: 1px solid var(--line-soft);
         min-width: 0;
       }
 
-      .metric span {
-        display: block;
-        color: var(--muted);
-        font-size: 11px;
+      .gauge:first-child {
+        border-left: 0;
       }
 
-      .metric strong {
+      .gauge-label {
         display: block;
-        margin-top: 4px;
-        font-size: 15px;
+        font-size: 9.5px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+
+      .gauge-value {
+        display: block;
+        margin-top: 6px;
+        font-family: var(--mono);
+        font-size: 18px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        color: var(--text);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .run-grid {
-        display: grid;
-        grid-template-columns: minmax(290px, 0.42fr) minmax(0, 0.58fr);
-        gap: 14px;
-        min-height: 560px;
+      #metric-state {
+        color: var(--signal);
       }
 
-      .timeline,
-      .memo-pane {
-        min-height: 0;
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
-      }
-
-      .scroll-region {
-        overflow: auto;
-        padding: 14px;
-      }
-
-      .event-list {
-        display: grid;
-        gap: 9px;
-      }
-
-      .event-item {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 10px;
-        background: var(--panel-soft);
-      }
-
-      .event-top {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-      }
-
-      .event-name {
-        font-size: 13px;
-        font-weight: 750;
-      }
-
-      .event-detail {
-        margin-top: 6px;
-        color: var(--muted);
-        font-family:
-          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-          monospace;
-        font-size: 12px;
-        line-height: 1.45;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-
-      .tag {
-        display: inline-flex;
-        align-items: center;
-        border-radius: 999px;
-        padding: 3px 8px;
-        font-size: 11px;
-        font-weight: 750;
-        background: #e9eef4;
-        color: var(--muted);
-        white-space: nowrap;
-      }
-
-      .tag.turn {
-        color: var(--blue);
-        background: #eaf1fb;
-      }
-
-      .tag.tool {
-        color: var(--accent-dark);
-        background: #e7f3f3;
-      }
-
-      .tag.result {
-        color: var(--green);
-        background: #e9f4ee;
-      }
-
-      .tag.guard {
-        color: var(--amber);
-        background: #fff5dd;
-      }
-
-      .tag.final {
-        color: #ffffff;
-        background: var(--green);
-      }
-
-      .paper-list,
-      .citation-list,
-      .warning-list,
-      .diagnostic-list {
-        display: grid;
-        gap: 10px;
-      }
-
-      .paper-row,
-      .citation-row,
-      .warning-row,
-      .diagnostic-row {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 10px;
-        background: var(--panel-soft);
-      }
-
-      .paper-title,
-      .citation-title {
-        font-size: 13px;
-        font-weight: 750;
-        line-height: 1.35;
-      }
-
-      .paper-meta,
-      .citation-meta {
-        margin-top: 5px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .paper-summary {
-        margin-top: 8px;
-        color: #39414c;
-        font-size: 12px;
-        line-height: 1.45;
-      }
+      /* ---------- tabs ---------- */
 
       .tabs {
         display: flex;
-        gap: 6px;
-        padding: 8px;
-        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line-soft);
       }
 
       .tab-button {
-        border: 1px solid transparent;
+        position: relative;
+        padding: 8px 13px;
+        border: 0;
         background: transparent;
         color: var(--muted);
-        border-radius: 6px;
-        padding: 7px 9px;
-        font-weight: 750;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        letter-spacing: 0.06em;
+        border-radius: 8px;
+        transition:
+          color 0.15s ease,
+          background 0.15s ease;
+      }
+
+      .tab-button:hover {
+        color: var(--text);
+        background: var(--sub);
       }
 
       .tab-button.active {
-        border-color: var(--line);
-        background: var(--panel-soft);
-        color: var(--ink);
+        color: var(--text);
+        background: var(--sub);
+      }
+
+      .tab-button.active::after {
+        content: "";
+        position: absolute;
+        left: 13px;
+        right: 13px;
+        bottom: -11px;
+        height: 2px;
+        border-radius: 2px;
+        background: var(--signal);
+      }
+
+      .tab-content {
+        padding: 16px 17px;
+        max-height: 56vh;
+        overflow: auto;
       }
 
       .tab-page {
@@ -452,195 +626,520 @@
         display: block;
       }
 
-      .memo {
-        color: #20242a;
-        line-height: 1.58;
+      .empty-state {
+        padding: 18px 4px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--faint);
+      }
+
+      /* ---------- reasoning spine (timeline) ---------- */
+
+      .event-list {
+        position: relative;
+        display: grid;
+        gap: 11px;
+        padding-left: 24px;
+      }
+
+      .event-list::before {
+        content: "";
+        position: absolute;
+        left: 6px;
+        top: 10px;
+        bottom: 10px;
+        width: 2px;
+        background: linear-gradient(
+          var(--line),
+          var(--line-soft) 70%,
+          transparent
+        );
+      }
+
+      .event-list .empty-state {
+        padding-left: 0;
+      }
+
+      .event-item {
+        position: relative;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: 11px 13px;
+        background: var(--panel-2);
+        animation: riseIn 0.3s ease both;
+      }
+
+      .event-item::before {
+        content: "";
+        position: absolute;
+        left: -23px;
+        top: 15px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--panel);
+        border: 2px solid var(--faint);
+      }
+
+      .event-item:last-child::before {
+        border-color: var(--signal);
+        background: var(--signal);
+        box-shadow: 0 0 0 4px var(--signal-glow);
+      }
+
+      @keyframes riseIn {
+        from {
+          opacity: 0;
+          transform: translateY(7px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      .event-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .event-name {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .event-detail {
+        margin-top: 7px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11.5px;
+        line-height: 1.5;
+        white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
 
-      .memo h1,
-      .memo h2,
-      .memo h3 {
-        margin: 18px 0 8px;
-        line-height: 1.25;
-        letter-spacing: 0;
-      }
+      /* ---------- tags ---------- */
 
-      .memo h1 {
-        font-size: 24px;
-      }
-
-      .memo h2 {
-        font-size: 18px;
-      }
-
-      .memo h3 {
-        font-size: 15px;
-      }
-
-      .memo p {
-        margin: 0 0 10px;
-      }
-
-      .memo ul {
-        margin: 0 0 12px 20px;
-        padding: 0;
-      }
-
-      .memo li {
-        margin: 4px 0;
-      }
-
-      .memo code {
-        background: #eef2f6;
-        border: 1px solid var(--line);
-        border-radius: 4px;
-        padding: 1px 4px;
-        font-family:
-          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-          monospace;
-        font-size: 0.92em;
-      }
-
-      .empty-state {
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        border: 1px solid transparent;
+        background: rgba(144, 161, 177, 0.12);
         color: var(--muted);
-        font-size: 13px;
-        padding: 4px 0;
+        white-space: nowrap;
+      }
+
+      .tag.turn {
+        color: var(--blue);
+        background: rgba(127, 168, 219, 0.12);
+        border-color: rgba(127, 168, 219, 0.28);
+      }
+
+      .tag.tool {
+        color: var(--teal);
+        background: rgba(84, 184, 167, 0.12);
+        border-color: rgba(84, 184, 167, 0.28);
+      }
+
+      .tag.result {
+        color: var(--green);
+        background: rgba(143, 196, 109, 0.12);
+        border-color: rgba(143, 196, 109, 0.28);
+      }
+
+      .tag.guard {
+        color: var(--signal);
+        background: var(--signal-glow);
+        border-color: rgba(245, 166, 35, 0.32);
+      }
+
+      .tag.final {
+        color: #16240f;
+        background: var(--green);
+        border-color: var(--green);
+      }
+
+      /* ---------- result rows ---------- */
+
+      .paper-list,
+      .citation-list,
+      .warning-list,
+      .diagnostic-list {
+        display: grid;
+        gap: 11px;
       }
 
       .split-list {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 10px;
+        gap: 12px;
       }
 
+      .paper-row,
+      .citation-row,
+      .warning-row,
+      .diagnostic-row {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: 12px 13px;
+        background: var(--panel-2);
+      }
+
+      .warning-row {
+        border-left: 3px solid var(--signal);
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+
+      .paper-title,
+      .citation-title {
+        font-size: 13.5px;
+        font-weight: 600;
+        line-height: 1.4;
+      }
+
+      .paper-meta,
+      .citation-meta {
+        margin-top: 6px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--faint);
+      }
+
+      .paper-summary {
+        margin-top: 9px;
+        font-size: 12.5px;
+        line-height: 1.55;
+        color: var(--muted);
+      }
+
+      .diagnostic-row .paper-meta {
+        margin-top: 0;
+      }
+
+      .diagnostic-row .paper-title {
+        margin-top: 4px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        font-weight: 500;
+        color: var(--text);
+      }
+
+      /* ---------- memo (paper surface) ---------- */
+
+      .memo-card {
+        background: var(--paper);
+        border-color: var(--paper-line);
+        color: var(--paper-ink);
+        overflow: hidden;
+      }
+
+      .memo-card .card-head {
+        border-bottom: 1px solid var(--paper-line);
+        background: linear-gradient(180deg, var(--paper-2), var(--paper));
+      }
+
+      .memo-card .eyebrow {
+        color: var(--paper-link);
+      }
+
+      .memo-card .card-title h2 {
+        font-family: var(--serif);
+        font-weight: 600;
+        font-size: 17px;
+      }
+
+      .memo-status {
+        align-self: center;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 500;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--paper-muted);
+        border: 1px solid var(--paper-line);
+        border-radius: 999px;
+        padding: 4px 11px;
+      }
+
+      .memo-scroll {
+        padding: 22px 26px 28px;
+        max-height: 64vh;
+        overflow: auto;
+      }
+
+      .memo {
+        font-family: var(--serif);
+        font-size: 16px;
+        line-height: 1.68;
+        color: var(--paper-ink);
+        overflow-wrap: anywhere;
+      }
+
+      .memo .empty-state {
+        font-family: var(--mono);
+        color: var(--paper-muted);
+        padding: 4px 0;
+      }
+
+      .memo h1,
+      .memo h2,
+      .memo h3 {
+        font-family: var(--serif);
+        font-weight: 600;
+        line-height: 1.22;
+        margin: 22px 0 9px;
+        letter-spacing: -0.01em;
+      }
+
+      .memo h1 {
+        font-size: 27px;
+      }
+
+      .memo h2 {
+        font-size: 21px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--paper-line);
+      }
+
+      .memo h3 {
+        font-size: 17px;
+      }
+
+      .memo p {
+        margin: 0 0 12px;
+      }
+
+      .memo a {
+        color: var(--paper-link);
+        text-decoration: underline;
+      }
+
+      .memo ul {
+        margin: 0 0 14px 20px;
+        padding: 0;
+      }
+
+      .memo li {
+        margin: 5px 0;
+      }
+
+      .memo hr {
+        border: 0;
+        border-top: 1px solid var(--paper-line);
+        margin: 20px 0;
+      }
+
+      .memo code {
+        font-family: var(--mono);
+        font-size: 0.86em;
+        background: var(--paper-2);
+        border: 1px solid var(--paper-line);
+        border-radius: 5px;
+        padding: 1px 5px;
+      }
+
+      .memo-card .memo-scroll {
+        color-scheme: light;
+      }
+
+      /* ---------- primary card ---------- */
+
+      .card-primary {
+        border-color: rgba(245, 166, 35, 0.4);
+        box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.02) inset,
+          0 0 0 1px rgba(245, 166, 35, 0.08),
+          0 22px 46px -30px rgba(245, 166, 35, 0.35);
+      }
+
+      .card-primary::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 2px;
+        border-radius: var(--radius) var(--radius) 0 0;
+        background: linear-gradient(
+          90deg,
+          var(--signal-deep),
+          var(--signal) 45%,
+          transparent 85%
+        );
+      }
+
+      .field-hint {
+        margin-top: 6px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        line-height: 1.5;
+        color: var(--faint);
+      }
+
+      .field-hint code {
+        color: var(--muted);
+      }
+
+      .readout-refresh {
+        align-self: center;
+      }
+
+      /* ---------- responsive ---------- */
+
       @media (max-width: 1180px) {
-        .health-strip {
-          grid-template-columns: repeat(3, minmax(92px, 1fr));
+        .console {
+          grid-template-columns: 340px minmax(0, 1fr);
         }
 
-        main {
-          grid-template-columns: 360px minmax(0, 1fr);
-        }
-
-        .metric-grid {
+        .gauge-cluster {
           grid-template-columns: repeat(3, minmax(0, 1fr));
         }
 
-        .run-grid {
-          grid-template-columns: 1fr;
+        .gauge:nth-child(-n + 3) {
+          border-bottom: 1px solid var(--line-soft);
+        }
+
+        .gauge:nth-child(3n + 1) {
+          border-left: 0;
         }
       }
 
-      @media (max-width: 860px) {
-        .topbar,
-        main {
+      @media (max-width: 920px) {
+        .console {
           grid-template-columns: 1fr;
         }
 
-        .health-strip,
-        .metric-grid,
-        .split-list {
+        .rail {
+          position: static;
+          top: auto;
+        }
+
+        .pipeline {
+          display: none;
+        }
+
+        .tab-content,
+        .memo-scroll {
+          max-height: none;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .masthead-inner,
+        .console {
+          padding-left: 14px;
+          padding-right: 14px;
+        }
+
+        .gauge-cluster {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
-      }
 
-      @media (max-width: 560px) {
-        .topbar,
-        main {
-          padding-left: 12px;
-          padding-right: 12px;
+        .gauge:nth-child(2n + 1) {
+          border-left: 0;
         }
 
-        .health-strip,
-        .metric-grid,
+        .gauge:nth-child(-n + 4) {
+          border-bottom: 1px solid var(--line-soft);
+        }
+
         .inline-grid,
         .split-list {
           grid-template-columns: 1fr;
+        }
+
+        .readout-meta strong {
+          max-width: 92px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation: none !important;
+          transition: none !important;
         }
       }
     </style>
   </head>
   <body>
-    <div class="app-shell">
-      <header>
-        <div class="topbar">
-          <div>
-            <h1>Research Brief Agent</h1>
-            <div class="subtitle">Corpus ingest, retrieval preview, live agent run, cited memo.</div>
+    <div class="shell">
+      <header class="masthead">
+        <div class="masthead-inner">
+          <div class="brand">
+            <span class="brand-lamp" aria-hidden="true"></span>
+            <div class="brand-text">
+              <span class="brand-eyebrow">autonomous literature agent</span>
+              <h1 class="brand-name">Research Brief Agent</h1>
+            </div>
+            <div class="pipeline" aria-hidden="true">
+              <span>retrieve</span><i>/</i><span>read</span><i>/</i><span>cite</span><i>/</i><span>brief</span>
+            </div>
           </div>
-          <div class="health-strip" aria-live="polite">
-            <div class="pill"><span>Status</span><strong id="health-status">checking</strong></div>
-            <div class="pill"><span>Store</span><strong id="health-store">-</strong></div>
-            <div class="pill"><span>Papers</span><strong id="health-papers">-</strong></div>
-            <div class="pill"><span>LLM</span><strong id="health-llm">-</strong></div>
-            <div class="pill"><span>Trace</span><strong id="health-trace">-</strong></div>
+          <div class="readouts health-strip" aria-live="polite">
+            <div class="readout">
+              <span class="readout-lamp"></span>
+              <div class="readout-meta">
+                <span class="readout-label">Status</span>
+                <strong id="health-status">checking</strong>
+              </div>
+            </div>
+            <div class="readout">
+              <span class="readout-lamp"></span>
+              <div class="readout-meta">
+                <span class="readout-label">Store</span>
+                <strong id="health-store">-</strong>
+              </div>
+            </div>
+            <div class="readout">
+              <span class="readout-lamp"></span>
+              <div class="readout-meta">
+                <span class="readout-label">Papers</span>
+                <strong id="health-papers">-</strong>
+              </div>
+            </div>
+            <div class="readout">
+              <span class="readout-lamp"></span>
+              <div class="readout-meta">
+                <span class="readout-label">LLM</span>
+                <strong id="health-llm">-</strong>
+              </div>
+            </div>
+            <div class="readout">
+              <span class="readout-lamp"></span>
+              <div class="readout-meta">
+                <span class="readout-label">Trace</span>
+                <strong id="health-trace">-</strong>
+              </div>
+            </div>
+            <button id="refresh-health" class="ghost-btn readout-refresh" type="button">Refresh</button>
           </div>
         </div>
       </header>
 
-      <main>
-        <div class="left-rail">
-          <section>
-            <div class="panel-head">
-              <h2>Corpus</h2>
-              <button id="refresh-health" class="secondary-button" type="button">Refresh</button>
+      <main class="console">
+        <aside class="rail">
+          <section class="card card-primary">
+            <div class="card-head">
+              <div class="card-title">
+                <span class="eyebrow">reason</span>
+                <h2>Ask the agent</h2>
+              </div>
             </div>
-            <div class="panel-body">
-              <form id="ingest-form" class="form-grid">
-                <div>
-                  <label for="ingest-query">arXiv query</label>
-                  <textarea id="ingest-query" class="compact-textarea" required>cat:cs.LG AND all:retrieval augmented generation</textarea>
-                </div>
-                <div class="inline-grid">
-                  <div>
-                    <label for="ingest-count">Max papers</label>
-                    <input id="ingest-count" type="number" min="1" max="500" value="25" />
-                  </div>
-                  <div>
-                    <label for="ingest-start">Start date</label>
-                    <input id="ingest-start" type="date" />
-                  </div>
-                </div>
-                <div>
-                  <label for="ingest-end">End date</label>
-                  <input id="ingest-end" type="date" />
-                </div>
-                <button id="ingest-submit" class="primary-button" type="submit">Ingest Papers</button>
-                <div id="ingest-status" class="status-line"></div>
-              </form>
-            </div>
-          </section>
-
-          <section>
-            <div class="panel-head">
-              <h2>Search Preview</h2>
-            </div>
-            <div class="panel-body">
-              <form id="search-form" class="form-grid">
-                <div>
-                  <label for="search-query">Query</label>
-                  <textarea id="search-query" class="compact-textarea" required>RAG factual grounding hallucination reduction</textarea>
-                </div>
-                <div>
-                  <label for="search-k">Results</label>
-                  <input id="search-k" type="number" min="1" max="50" value="8" />
-                </div>
-                <button id="search-submit" class="secondary-button" type="submit">Search Corpus</button>
-                <div id="search-status" class="status-line"></div>
-              </form>
-            </div>
-          </section>
-
-          <section>
-            <div class="panel-head">
-              <h2>Agent Run</h2>
-            </div>
-            <div class="panel-body">
+            <div class="card-body">
               <form id="brief-form" class="form-grid">
                 <div>
                   <label for="question">Research question</label>
                   <textarea id="question" required>What RAG methods improve factual grounding, and what are their tradeoffs?</textarea>
+                  <div class="field-hint">The agent retrieves and reads arXiv papers on its own. Just ask in plain language.</div>
                 </div>
                 <div class="inline-grid">
                   <div>
@@ -670,38 +1169,32 @@ Track latency, cost, and operational risks.</textarea>
               </form>
             </div>
           </section>
-        </div>
+        </aside>
 
         <div class="workspace">
-          <section>
-            <div class="panel-body">
-              <div class="metric-grid">
-                <div class="metric"><span>Run state</span><strong id="metric-state">idle</strong></div>
-                <div class="metric"><span>Latency</span><strong id="metric-latency">-</strong></div>
-                <div class="metric"><span>LLM calls</span><strong id="metric-llm">-</strong></div>
-                <div class="metric"><span>Tool calls</span><strong id="metric-tools">-</strong></div>
-                <div class="metric"><span>Tokens</span><strong id="metric-tokens">-</strong></div>
-                <div class="metric"><span>Cost</span><strong id="metric-cost">-</strong></div>
+          <section class="card telemetry">
+            <div class="card-body">
+              <div class="gauge-cluster">
+                <div class="gauge"><span class="gauge-label">Run state</span><strong id="metric-state" class="gauge-value">idle</strong></div>
+                <div class="gauge"><span class="gauge-label">Latency</span><strong id="metric-latency" class="gauge-value">-</strong></div>
+                <div class="gauge"><span class="gauge-label">LLM calls</span><strong id="metric-llm" class="gauge-value">-</strong></div>
+                <div class="gauge"><span class="gauge-label">Tool calls</span><strong id="metric-tools" class="gauge-value">-</strong></div>
+                <div class="gauge"><span class="gauge-label">Tokens in/out</span><strong id="metric-tokens" class="gauge-value">-</strong></div>
+                <div class="gauge"><span class="gauge-label">Cost</span><strong id="metric-cost" class="gauge-value">-</strong></div>
               </div>
             </div>
           </section>
 
-          <section>
+          <section class="card">
             <div class="tabs" role="tablist" aria-label="Workspace views">
               <button class="tab-button active" data-tab="timeline" type="button">Timeline</button>
-              <button class="tab-button" data-tab="search" type="button">Search Results</button>
               <button class="tab-button" data-tab="evidence" type="button">Evidence</button>
               <button class="tab-button" data-tab="diagnostics" type="button">Diagnostics</button>
             </div>
-            <div class="panel-body">
+            <div class="tab-content">
               <div id="tab-timeline" class="tab-page active">
                 <div class="event-list" id="timeline-list">
-                  <div class="empty-state">No run events yet.</div>
-                </div>
-              </div>
-              <div id="tab-search" class="tab-page">
-                <div class="paper-list" id="search-results">
-                  <div class="empty-state">No search results yet.</div>
+                  <div class="empty-state">No run yet. Submit a question to watch the agent reason.</div>
                 </div>
               </div>
               <div id="tab-evidence" class="tab-page">
@@ -726,12 +1219,15 @@ Track latency, cost, and operational risks.</textarea>
             </div>
           </section>
 
-          <section class="memo-pane">
-            <div class="panel-head">
-              <h2>Final Memo</h2>
-              <span class="tag final" id="memo-tag">waiting</span>
+          <section class="card memo-card">
+            <div class="card-head">
+              <div class="card-title">
+                <span class="eyebrow">brief</span>
+                <h2>Final Memo</h2>
+              </div>
+              <span class="memo-status" id="memo-tag">waiting</span>
             </div>
-            <div class="scroll-region">
+            <div class="memo-scroll">
               <article id="memo" class="memo">
                 <div class="empty-state">Run the agent to generate a memo.</div>
               </article>
@@ -749,6 +1245,7 @@ Track latency, cost, and operational risks.</textarea>
         health: null,
         final: null,
         running: false,
+        warnings: [],
         eventCounts: {
           llm_turn: 0,
           tool_call: 0,
@@ -762,13 +1259,6 @@ Track latency, cost, and operational risks.</textarea>
         healthPapers: $("#health-papers"),
         healthLlm: $("#health-llm"),
         healthTrace: $("#health-trace"),
-        ingestForm: $("#ingest-form"),
-        ingestSubmit: $("#ingest-submit"),
-        ingestStatus: $("#ingest-status"),
-        searchForm: $("#search-form"),
-        searchSubmit: $("#search-submit"),
-        searchStatus: $("#search-status"),
-        searchResults: $("#search-results"),
         briefForm: $("#brief-form"),
         briefSubmit: $("#brief-submit"),
         briefStatus: $("#brief-status"),
@@ -797,11 +1287,6 @@ Track latency, cost, and operational risks.</textarea>
         node.classList.toggle("error", isError);
       }
 
-      function dateRange(start, end) {
-        if (!start && !end) return null;
-        return {start: start || null, end: end || null};
-      }
-
       function formatMs(value) {
         if (!Number.isFinite(value)) return "-";
         if (value < 1000) return `${Math.round(value)} ms`;
@@ -820,25 +1305,6 @@ Track latency, cost, and operational risks.</textarea>
           .replace(/>/g, "&gt;")
           .replace(/"/g, "&quot;")
           .replace(/'/g, "&#039;");
-      }
-
-      async function readJsonOrText(response) {
-        const contentType = response.headers.get("content-type") || "";
-        if (contentType.includes("application/json")) {
-          const data = await response.json();
-          if (!response.ok) {
-            const detail = Array.isArray(data.detail)
-              ? data.detail.map((item) => item.msg || JSON.stringify(item)).join("; ")
-              : data.detail || JSON.stringify(data);
-            throw new Error(detail);
-          }
-          return data;
-        }
-        const text = await response.text();
-        if (!response.ok) {
-          throw new Error(text || `HTTP ${response.status}`);
-        }
-        return text;
       }
 
       function inlineMarkdown(value) {
@@ -899,121 +1365,49 @@ Track latency, cost, and operational risks.</textarea>
         return html.join("");
       }
 
+      function setReadout(node, text, tone = "") {
+        node.textContent = text;
+        const readout = node.closest(".readout");
+        if (readout) {
+          readout.classList.remove("live", "warn", "down");
+          if (tone) readout.classList.add(tone);
+        }
+      }
+
       async function loadHealth() {
         try {
           const response = await fetch("/health");
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          state.health = await response.json();
-          elements.healthStatus.textContent = state.health.status || "ok";
-          elements.healthStore.textContent = state.health.retrieval_backend || "-";
-          elements.healthPapers.textContent = String(state.health.papers_indexed ?? "-");
-          elements.healthLlm.textContent = state.health.llm_provider || "-";
-          elements.healthTrace.textContent = state.health.langfuse_enabled ? "on" : "off";
+          const payload = await response.json();
+          if (!payload || typeof payload !== "object") throw new Error(`HTTP ${response.status}`);
+          if (!("ready" in payload) || !("vector_store" in payload)) throw new Error(`HTTP ${response.status}`);
+
+          state.health = payload;
+          const vectorStore = payload.vector_store || {};
+          const llm = payload.llm_provider || {};
+          const statusTone = payload.ready ? "live" : "warn";
+          const storeTone = vectorStore.status === "error" ? "down" : vectorStore.fallback ? "warn" : "live";
+          const papersTone = Number.isFinite(payload.papers_indexed) ? "live" : "warn";
+          const llmTone = llm.key_present ? "live" : "warn";
+
+          setReadout(elements.healthStatus, payload.status || (response.ok ? "ok" : "degraded"), statusTone);
+          setReadout(elements.healthStore, payload.retrieval_backend || "-", storeTone);
+          setReadout(elements.healthPapers, String(payload.papers_indexed ?? "-"), papersTone);
+          setReadout(elements.healthLlm, llm.provider || "-", llmTone);
+          setReadout(elements.healthTrace, payload.langfuse_enabled ? "on" : "off", payload.langfuse_enabled ? "live" : "warn");
         } catch (error) {
-          elements.healthStatus.textContent = "offline";
-          elements.healthStore.textContent = "-";
-          elements.healthPapers.textContent = "-";
-          elements.healthLlm.textContent = "-";
-          elements.healthTrace.textContent = "-";
+          state.health = null;
+          setReadout(elements.healthStatus, "offline", "down");
+          setReadout(elements.healthStore, "-", "down");
+          setReadout(elements.healthPapers, "-", "down");
+          setReadout(elements.healthLlm, "-", "down");
+          setReadout(elements.healthTrace, "-", "down");
         }
-      }
-
-      async function ingestCorpus(event) {
-        event.preventDefault();
-        setBusy(elements.ingestSubmit, true, "Ingesting");
-        setStatus(elements.ingestStatus, "Submitting ingest job...");
-        try {
-          const payload = {
-            query: $("#ingest-query").value.trim(),
-            max_papers: Number($("#ingest-count").value),
-            date_range: dateRange($("#ingest-start").value, $("#ingest-end").value)
-          };
-          const data = await ingestWithDateFallback(payload);
-          const fallbackNote = data._dateFallback ? " Date range was removed after arXiv rejected the filtered query." : "";
-          setStatus(
-            elements.ingestStatus,
-            `Ingested ${data.ingested} papers into ${data.retrieval_backend} in ${formatMs(data.latency_ms)}.${fallbackNote}`
-          );
-          await loadHealth();
-        } catch (error) {
-          setStatus(elements.ingestStatus, error.message, true);
-        } finally {
-          setBusy(elements.ingestSubmit, false);
-        }
-      }
-
-      async function postIngest(payload) {
-        const response = await fetch("/ingest", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(payload)
-        });
-        return readJsonOrText(response);
-      }
-
-      async function ingestWithDateFallback(payload) {
-        try {
-          return await postIngest(payload);
-        } catch (error) {
-          if (!payload.date_range || !String(error.message).includes("arXiv API request failed")) {
-            throw error;
-          }
-          setStatus(
-            elements.ingestStatus,
-            "Date-filtered arXiv query failed; retrying without date range..."
-          );
-          const retryPayload = {...payload, date_range: null};
-          const data = await postIngest(retryPayload);
-          $("#ingest-start").value = "";
-          $("#ingest-end").value = "";
-          data._dateFallback = true;
-          return data;
-        }
-      }
-
-      async function searchCorpus(event) {
-        event.preventDefault();
-        setBusy(elements.searchSubmit, true, "Searching");
-        setStatus(elements.searchStatus, "Searching corpus...");
-        elements.searchResults.innerHTML = '<div class="empty-state">Searching...</div>';
-        try {
-          const query = $("#search-query").value.trim();
-          const k = Number($("#search-k").value);
-          const response = await fetch(`/papers/search?query=${encodeURIComponent(query)}&k=${encodeURIComponent(k)}`);
-          const data = await readJsonOrText(response);
-          setStatus(elements.searchStatus, `${data.results.length} results in ${formatMs(data.retrieval_latency_ms)}.`);
-          renderSearchResults(data.results);
-          activateTab("search");
-        } catch (error) {
-          setStatus(elements.searchStatus, error.message, true);
-          elements.searchResults.innerHTML = '<div class="empty-state">Search failed.</div>';
-        } finally {
-          setBusy(elements.searchSubmit, false);
-        }
-      }
-
-      function renderSearchResults(results) {
-        if (!results.length) {
-          elements.searchResults.innerHTML = '<div class="empty-state">No matching papers.</div>';
-          return;
-        }
-        elements.searchResults.innerHTML = results.map((item) => {
-          const paper = item.paper;
-          const score = Number.isFinite(item.score) ? item.score.toFixed(3) : "-";
-          const url = paper.arxiv_url || `https://arxiv.org/abs/${encodeURIComponent(paper.id)}`;
-          return `
-            <div class="paper-row">
-              <div class="paper-title"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(paper.title)}</a></div>
-              <div class="paper-meta">${escapeHtml(paper.id)} | score ${escapeHtml(score)} | ${escapeHtml(paper.primary_category || "uncategorized")}</div>
-              <div class="paper-summary">${escapeHtml((paper.summary || "").slice(0, 420))}</div>
-            </div>
-          `;
-        }).join("");
       }
 
       function resetRun() {
         state.final = null;
         state.running = true;
+        state.warnings = [];
         state.eventCounts = {llm_turn: 0, tool_call: 0, tool_result: 0};
         elements.timeline.innerHTML = "";
         elements.memo.innerHTML = '<div class="empty-state">Run in progress.</div>';
@@ -1104,6 +1498,10 @@ Track latency, cost, and operational risks.</textarea>
         if (eventData.event === "degraded") {
           elements.metricState.textContent = "degraded";
         }
+        if (eventData.event === "warning") {
+          state.warnings.push(eventData.message || eventData.code || "Warning");
+          renderWarnings(state.warnings);
+        }
         if (eventData.event === "error") {
           elements.metricState.textContent = "error";
         }
@@ -1118,6 +1516,7 @@ Track latency, cost, and operational risks.</textarea>
         if (eventName === "tool_result") return "result";
         if (eventName === "discovery_budget_reached") return "guard";
         if (eventName === "evidence_required") return "guard";
+        if (eventName === "warning") return "guard";
         if (eventName === "degraded") return "guard";
         if (eventName === "error") return "guard";
         if (eventName === "final") return "final";
@@ -1146,6 +1545,7 @@ Track latency, cost, and operational risks.</textarea>
           return `${eventData.message || "Full-text evidence required."}\nCandidates: ${(eventData.candidate_ids || []).join(", ") || "none"}`;
         }
         if (eventData.event === "degraded") return eventData.message || "Run degraded.";
+        if (eventData.event === "warning") return eventData.message || eventData.code || "Warning.";
         if (eventData.event === "synthesis_complete") return `LLM calls: ${eventData.llm_calls}`;
         if (eventData.event === "final") return "Final response received.";
         if (eventData.event === "error") return eventData.message || "Error.";
@@ -1172,6 +1572,7 @@ Track latency, cost, and operational risks.</textarea>
         state.final = data;
         const usage = data.token_cost_estimate || {};
         const diagnostics = data.retrieval_diagnostics || {};
+        const fullText = data.full_text_diagnostics || {};
         elements.metricState.textContent = "complete";
         elements.metricLatency.textContent = formatMs(data.latency_ms);
         elements.metricLlm.textContent = String(usage.llm_call_count ?? state.eventCounts.llm_turn);
@@ -1183,7 +1584,7 @@ Track latency, cost, and operational risks.</textarea>
         setStatus(elements.briefStatus, `Completed in ${formatMs(data.latency_ms)}.`);
         renderCitations(data.cited_papers || []);
         renderWarnings(data.warnings || []);
-        renderDiagnostics(diagnostics, usage, data.langfuse_trace_url);
+        renderDiagnostics(diagnostics, fullText, usage, data.langfuse_trace_url);
       }
 
       function renderCitations(citations) {
@@ -1213,13 +1614,20 @@ Track latency, cost, and operational risks.</textarea>
         `).join("");
       }
 
-      function renderDiagnostics(diagnostics, usage, traceUrl) {
+      function renderDiagnostics(diagnostics, fullText, usage, traceUrl) {
+        const errorCounts = fullText.error_counts || {};
+        const errorSummary = Object.keys(errorCounts).length
+          ? Object.entries(errorCounts).map(([key, value]) => `${key}: ${value}`).join(", ")
+          : "-";
         const rows = [
           ["Query", diagnostics.query || "-"],
           ["Requested k", diagnostics.requested_k ?? "-"],
           ["Returned", diagnostics.returned ?? "-"],
           ["Retrieval latency", formatMs(diagnostics.retrieval_latency_ms)],
           ["Score range", `${diagnostics.min_score ?? "-"} to ${diagnostics.max_score ?? "-"}`],
+          ["Full text", `${fullText.succeeded ?? 0} ok / ${fullText.failed ?? 0} failed / ${fullText.attempted ?? 0} attempted`],
+          ["Full-text errors", errorSummary],
+          ["Missing ids", (fullText.missing_ids || []).join(", ") || "-"],
           ["Input tokens", usage.input_tokens ?? 0],
           ["Output tokens", usage.output_tokens ?? 0],
           ["Trace", traceUrl ? `<a href="${escapeHtml(traceUrl)}" target="_blank" rel="noreferrer">open trace</a>` : "-"]
@@ -1245,8 +1653,6 @@ Track latency, cost, and operational risks.</textarea>
         button.addEventListener("click", () => activateTab(button.dataset.tab));
       });
       $("#refresh-health").addEventListener("click", loadHealth);
-      elements.ingestForm.addEventListener("submit", ingestCorpus);
-      elements.searchForm.addEventListener("submit", searchCorpus);
       elements.briefForm.addEventListener("submit", runBrief);
 
       loadHealth();
