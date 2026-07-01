@@ -68,6 +68,14 @@ class RetrievalDiagnostics(BaseModel):
     max_score: float | None = None
 
 
+class FullTextDiagnostics(BaseModel):
+    attempted: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    error_counts: dict[str, int] = Field(default_factory=dict)
+    missing_ids: list[str] = Field(default_factory=list)
+
+
 class UsageEstimate(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
@@ -87,6 +95,9 @@ class BriefResponse(BaseModel):
     final_brief: str
     cited_papers: list[CitedPaper]
     retrieval_diagnostics: RetrievalDiagnostics
+    full_text_diagnostics: FullTextDiagnostics = Field(
+        default_factory=FullTextDiagnostics
+    )
     latency_ms: float
     token_cost_estimate: UsageEstimate
     langfuse_trace_url: HttpUrl | None = None

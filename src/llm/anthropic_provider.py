@@ -22,7 +22,9 @@ class AnthropicProvider:
 
     name = "anthropic"
 
-    def __init__(self, *, api_key: str, model: str, max_tokens: int, temperature: float):
+    def __init__(
+        self, *, api_key: str, model: str, max_tokens: int, temperature: float
+    ):
         self.model = model
         self._api_key = api_key
         self._max_tokens = max_tokens

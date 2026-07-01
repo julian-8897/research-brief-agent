@@ -5,11 +5,12 @@ import re
 from typing import Any
 
 from src.agent.tools import ResearchTools
-from src.ingestion import fetch_arxiv_fulltext
+from src.ingestion import FullTextFetchError, fetch_arxiv_fulltext
 from src.llm import ToolCall, ToolSpec
 from src.models import (
     BriefRequest,
     CitedPaper,
+    FullTextDiagnostics,
     RetrievalDiagnostics,
     SearchResponseItem,
 )
@@ -22,6 +23,32 @@ _MAX_SEARCH_K = 20
 _MIN_FETCH_RESULTS = 1
 _MAX_FETCH_RESULTS = 50
 _ARXIV_VERSION_SUFFIX = re.compile(r"v\d+$")
+
+
+def _build_search_embedding_text(
+    research_question: str, query: str, constraints: list[str] | None = None
+) -> str:
+    parts = [
+        ("Research question", research_question),
+        ("Search focus", query),
+    ]
+    if constraints:
+        clean_constraints = [item.strip() for item in constraints if item.strip()]
+        if clean_constraints:
+            parts.append(("Constraints", "; ".join(clean_constraints)))
+
+    seen: set[str] = set()
+    lines: list[str] = []
+    for label, value in parts:
+        value = value.strip()
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"{label}: {value}")
+    return "\n".join(lines)
 
 
 class ResearchToolset:
@@ -44,7 +71,9 @@ class ResearchToolset:
         self._fulltext_cache: dict[str, tuple[str, bool]] = {}
         self._fulltext_success_ids: set[str] = set()
         self._fulltext_attempted_ids: set[str] = set()
+        self._fulltext_missing_ids: set[str] = set()
         self._fulltext_error_count = 0
+        self._fulltext_error_counts: dict[str, int] = {}
 
     # -- Tool catalogue -------------------------------------------------------
 
@@ -81,14 +110,20 @@ class ResearchToolset:
             description=(
                 "Semantic search over the indexed arXiv corpus. Returns the "
                 "most relevant papers with id, title, similarity score, and an "
-                "abstract snippet. Call this first to gather evidence."
+                "abstract snippet. Call this first to gather evidence. SPECTER "
+                "ranks best when the query is a descriptive, abstract-like "
+                "sentence, not bare keywords."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Natural-language search query.",
+                        "description": (
+                            "Descriptive natural-language sentence about the "
+                            "target methods, domain, and evidence needed; avoid "
+                            "keyword-only fragments."
+                        ),
                     },
                     "k": {
                         "type": "integer",
@@ -201,7 +236,9 @@ class ResearchToolset:
                 "max_results",
                 default=15,
                 minimum=_MIN_FETCH_RESULTS,
-                maximum=min(_MAX_FETCH_RESULTS, self._tools.settings.max_ingest_results),
+                maximum=min(
+                    _MAX_FETCH_RESULTS, self._tools.settings.max_ingest_results
+                ),
             )
             if max_results is None:
                 return self._invalid_args("max_results must be an integer")
@@ -273,7 +310,10 @@ class ResearchToolset:
     def _search_papers(self, query: str, k: int) -> tuple[str, dict[str, Any]]:
         if not query:
             return json.dumps({"error": "query is required"}), {"returned": 0}
-        result = self._tools.vector_retrieve(query, k)
+        embed_text = _build_search_embedding_text(
+            self._request.research_question, query, self._request.constraints
+        )
+        result = self._tools.vector_retrieve(query, k, embed_text=embed_text)
         self._search_latency_ms += result.diagnostics.retrieval_latency_ms
         self._max_requested_k = max(self._max_requested_k, k)
         for item in result.items:
@@ -290,6 +330,19 @@ class ResearchToolset:
         content = json.dumps(
             {"query": query, "returned": len(papers), "papers": papers}
         )
+        if not papers:
+            content = json.dumps(
+                {
+                    "query": query,
+                    "returned": 0,
+                    "papers": [],
+                    "hint": (
+                        "No indexed papers cleared the relevance threshold. "
+                        "Call fetch_arxiv with a descriptive arXiv query, then "
+                        "run search_papers once again."
+                    ),
+                }
+            )
         return content, {"returned": len(papers)}
 
     def _fetch_arxiv(self, query: str, max_results: int) -> tuple[str, dict[str, Any]]:
@@ -330,6 +383,9 @@ class ResearchToolset:
     def _get_full_text(self, paper_ids: Any) -> tuple[str, dict[str, Any]]:
         settings = self._tools.settings
         ids, missing = self._resolve_paper_ids(paper_ids)
+        for missing_id in missing:
+            self._record_fulltext_error("bad_id")
+            self._fulltext_missing_ids.add(missing_id)
         remaining_budget = max(
             0, settings.full_text_total_paper_budget - self.fulltext_success_count
         )
@@ -365,14 +421,42 @@ class ResearchToolset:
                         timeout=settings.full_text_timeout_s,
                         char_budget=settings.full_text_char_budget,
                     )
+                except FullTextFetchError as exc:
+                    self._record_fulltext_error(exc.code)
+                    papers.append(
+                        {
+                            "id": pid,
+                            "title": title,
+                            "error_code": exc.code,
+                            "error": exc.message,
+                            "status_code": exc.status_code,
+                        }
+                    )
+                    continue
+                except ValueError:
+                    raise
                 except Exception as exc:
-                    self._fulltext_error_count += 1
-                    papers.append({"id": pid, "error": f"could not fetch full text ({exc})"})
+                    self._record_fulltext_error("unknown")
+                    papers.append(
+                        {
+                            "id": pid,
+                            "title": title,
+                            "error_code": "unknown",
+                            "error": f"could not fetch full text ({exc})",
+                        }
+                    )
                     continue
             text, truncated = self._fulltext_cache[pid]
             if not text.strip():
-                self._fulltext_error_count += 1
-                papers.append({"id": pid, "error": "full text extraction returned no text"})
+                self._record_fulltext_error("empty_text")
+                papers.append(
+                    {
+                        "id": pid,
+                        "title": title,
+                        "error_code": "empty_text",
+                        "error": "full text extraction returned no text",
+                    }
+                )
                 continue
             self._fulltext_success_ids.add(pid)
             fetched += 1
@@ -389,10 +473,31 @@ class ResearchToolset:
         if missing:
             payload["missing"] = missing
             payload["available_ids"] = self.candidate_ids()
-        return json.dumps(payload), {"fetched": fetched}
+            payload["errors"] = [
+                {
+                    "id": missing_id,
+                    "error_code": "bad_id",
+                    "error": "paper id was not found in retrieved candidates",
+                }
+                for missing_id in missing
+            ]
+        if self._fulltext_error_counts:
+            payload["error_counts"] = dict(sorted(self._fulltext_error_counts.items()))
+        meta: dict[str, Any] = {"fetched": fetched}
+        if self._fulltext_error_counts:
+            meta["error_counts"] = dict(sorted(self._fulltext_error_counts.items()))
+        return json.dumps(payload), meta
+
+    def _record_fulltext_error(self, code: str) -> None:
+        self._fulltext_error_count += 1
+        self._fulltext_error_counts[code] = self._fulltext_error_counts.get(code, 0) + 1
 
     def _resolve_paper_ids(self, paper_ids: Any) -> tuple[list[str], list[str]]:
-        ids = [str(pid).strip() for pid in paper_ids] if isinstance(paper_ids, list) else []
+        ids = (
+            [str(pid).strip() for pid in paper_ids]
+            if isinstance(paper_ids, list)
+            else []
+        )
         resolved: list[str] = []
         missing: list[str] = []
         for pid in ids:
@@ -438,6 +543,10 @@ class ResearchToolset:
         return self._fulltext_error_count
 
     @property
+    def fulltext_error_counts(self) -> dict[str, int]:
+        return dict(sorted(self._fulltext_error_counts.items()))
+
+    @property
     def fulltext_budget_reached(self) -> bool:
         return (
             self.fulltext_success_count
@@ -479,4 +588,13 @@ class ResearchToolset:
             retrieval_latency_ms=self._search_latency_ms,
             min_score=min(scores) if scores else None,
             max_score=max(scores) if scores else None,
+        )
+
+    def fulltext_diagnostics(self) -> FullTextDiagnostics:
+        return FullTextDiagnostics(
+            attempted=self.fulltext_attempt_count,
+            succeeded=self.fulltext_success_count,
+            failed=self.fulltext_error_count,
+            error_counts=self.fulltext_error_counts,
+            missing_ids=sorted(self._fulltext_missing_ids),
         )

@@ -5,8 +5,13 @@ from src.settings import Settings
 
 
 def test_build_provider_returns_none_without_key():
-    assert build_llm_provider(Settings(llm_provider="anthropic", anthropic_api_key=None)) is None
-    assert build_llm_provider(Settings(llm_provider="openai", openai_api_key=None)) is None
+    assert (
+        build_llm_provider(Settings(llm_provider="anthropic", anthropic_api_key=None))
+        is None
+    )
+    assert (
+        build_llm_provider(Settings(llm_provider="openai", openai_api_key=None)) is None
+    )
 
 
 def test_build_anthropic_provider():

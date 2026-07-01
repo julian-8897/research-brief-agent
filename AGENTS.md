@@ -25,7 +25,7 @@ Tests run without any API keys or network: with no provider key the agent uses a
 
 ## Architecture
 
-Two phases. **Ingest** (`POST /ingest`): fetch arXiv metadata, embed title+abstract with SPECTER, upsert into Qdrant. **Brief** (`POST /briefs/stream`): the agent loop answers a question against that corpus.
+Two phases. **Ingest** (`POST /ingest`): fetch arXiv metadata, embed title+abstract with SPECTER2's document/proximity adapter, upsert into Qdrant. **Brief** (`POST /briefs/stream`): the agent loop answers a question against that corpus using SPECTER2's adhoc-query adapter for search text.
 
 The brief request is the core flow and spans several modules:
 
@@ -47,5 +47,6 @@ The brief request is the core flow and spans several modules:
 - **Provider parity is the fragile part.** Any change to the tool-use layer must be mirrored in both providers and covered by `tests/test_llm_providers.py` (which fakes the SDKs).
 - **Both providers and the no-key fallback must keep working.** `LLM_PROVIDER=anthropic|openai`; `openai` also covers DeepSeek/local/OpenRouter/codex/opencode via `OPENAI_BASE_URL`. The default OpenAI-compatible model is `deepseek-v4-flash`; override `OPENAI_MODEL` for other endpoints.
 - **Legacy, do not build on:** `src/vector_store.py` is a backward-compat alias for old scripts; `scripts/run_arxiv_search.py` and `config/categories.yaml` are leftovers from the prior Streamlit demo. New code uses `src/retrieval/`.
-- Config is env-driven; see `.env.example`. A local `.env` is auto-loaded (python-dotenv in `src/settings.py`), so secrets live there (gitignored), not in the shell. Defaults favor a runnable local setup (in-memory store, deterministic fallback) when services/keys are missing.
+- Config is env-driven; see `.env.example`. A local `.env` is auto-loaded (python-dotenv in `src/settings.py`), so secrets live there (gitignored), not in the shell. Defaults favor a runnable local setup (in-memory store, deterministic fallback) when services/keys are missing. Embeddings default to `EMBEDDING_MODEL=allenai/specter2_base`, `EMBEDDING_DOCUMENT_ADAPTER=allenai/specter2`, and `EMBEDDING_QUERY_ADAPTER=allenai/specter2_adhoc_query`.
+- Retrieval quality is guarded in the agent layer: `search_papers` embeds descriptive text built from the brief request, tool query, and constraints, and `RETRIEVAL_MIN_SCORE` can drop weak vector matches before they reach the model.
 - **Tests are hermetic by contract:** `tests/conftest.py` sets `DISABLE_DOTENV=1` and clears provider keys before `src.settings` imports, so a real key in `.env` never causes the suite to hit a live LLM. `Settings` reads env at class-definition (import) time — overrides must be passed explicitly to `Settings(...)`, not set after import.

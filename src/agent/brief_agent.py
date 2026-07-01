@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 from src.agent.tools import ResearchTools
-from src.agent.toolset import ResearchToolset
+from src.agent.toolset import ResearchToolset, _build_search_embedding_text
 from src.llm import (
     AssistantMessage,
     LLMProvider,
@@ -124,7 +124,7 @@ class ResearchBriefAgent:
             for turn_index in range(1, self.settings.agent_max_iterations + 1):
                 if discovery_budget_reached and not discovery_budget_event_emitted:
                     messages.append(UserMessage(self._discovery_budget_nudge(toolset)))
-                    yield {"event": "discovery_budget_reached"}
+                    yield self._discovery_budget_event(toolset)
                     discovery_budget_event_emitted = True
                 offered_tools = (
                     toolset.full_text_specs
@@ -138,7 +138,10 @@ class ResearchBriefAgent:
                 offered_tool_names = {tool.name for tool in offered_tools}
                 with self.tracer.span(trace, "llm_turn", turn=turn_index):
                     turn = self._run_llm_turn(
-                        system, messages, offered_tools, stage="llm_turn"
+                        system,
+                        self._messages_for_turn(messages),
+                        offered_tools,
+                        stage="llm_turn",
                     )
                 self._accumulate(usage, turn)
                 yield {
@@ -188,29 +191,53 @@ class ResearchBriefAgent:
                 if discovery_calls >= self.settings.agent_max_search_calls:
                     discovery_budget_reached = True
                     if not discovery_budget_event_emitted:
-                        messages.append(UserMessage(self._discovery_budget_nudge(toolset)))
-                        yield {"event": "discovery_budget_reached"}
+                        messages.append(
+                            UserMessage(self._discovery_budget_nudge(toolset))
+                        )
+                        yield self._discovery_budget_event(toolset)
                         discovery_budget_event_emitted = True
 
                 if usage.tool_call_count >= self.settings.agent_max_tool_calls:
-                    warnings.append(
-                        "Tool-call budget reached; forcing final synthesis."
+                    warning = "Tool-call budget reached; forcing final synthesis."
+                    warnings.append(warning)
+                    yield self._warning_event(
+                        "tool_budget_reached",
+                        warning,
+                        tool_calls=usage.tool_call_count,
                     )
                     if self._needs_full_text(toolset):
                         warning = self._full_text_degraded_warning(toolset)
                         warnings.append(warning)
-                        yield self._degraded_event("full_text_missing", warning, toolset)
+                        yield self._warning_event(
+                            "full_text_missing",
+                            warning,
+                            full_text_fetched=toolset.fulltext_success_count,
+                            full_text_attempts=toolset.fulltext_attempt_count,
+                        )
+                        yield self._degraded_event(
+                            "full_text_missing", warning, toolset
+                        )
                     final_text = self._force_final(
                         trace, request, system, messages, usage, toolset
                     )
                     break
             else:
-                warnings.append(
-                    "Reached max agent iterations; forcing final synthesis."
+                warning = "Reached max agent iterations; forcing final synthesis."
+                warnings.append(warning)
+                yield self._warning_event(
+                    "iteration_budget_reached",
+                    warning,
+                    iterations=self.settings.agent_max_iterations,
                 )
                 if self._needs_full_text(toolset):
                     warning = self._full_text_degraded_warning(toolset)
                     warnings.append(warning)
+                    yield self._warning_event(
+                        "full_text_missing",
+                        warning,
+                        full_text_fetched=toolset.fulltext_success_count,
+                        full_text_attempts=toolset.fulltext_attempt_count,
+                    )
                     yield self._degraded_event("full_text_missing", warning, toolset)
                 final_text = self._force_final(
                     trace, request, system, messages, usage, toolset
@@ -238,10 +265,17 @@ class ResearchBriefAgent:
             "full_text_fetched": toolset.fulltext_success_count,
         }
 
-        brief = final_text or "No brief was produced."
+        brief = self._normalize_final_brief(final_text or "No brief was produced.")
         if toolset.retrieved_count < 2:
-            warnings.append(
+            warning = (
                 "Retrieved evidence is thin; the brief should use explicit uncertainty."
+            )
+            warnings.append(warning)
+            yield self._warning_event(
+                "thin_evidence",
+                warning,
+                retrieved=toolset.retrieved_count,
+                requested=request.max_papers,
             )
         usage.estimated_cost_usd = _estimate_cost(
             self.settings, usage.input_tokens, usage.output_tokens
@@ -250,6 +284,7 @@ class ResearchBriefAgent:
             final_brief=brief,
             cited_papers=toolset.cited_papers(brief),
             retrieval_diagnostics=toolset.diagnostics(),
+            full_text_diagnostics=toolset.fulltext_diagnostics(),
             latency_ms=(time.perf_counter() - started) * 1000,
             token_cost_estimate=usage,
             langfuse_trace_url=trace.trace_url,
@@ -310,6 +345,19 @@ class ResearchBriefAgent:
         )
 
     @staticmethod
+    def _discovery_budget_event(toolset: ResearchToolset) -> dict[str, Any]:
+        return {
+            "event": "discovery_budget_reached",
+            "reason": "search_budget_reached",
+            "message": ResearchBriefAgent._discovery_budget_nudge(toolset),
+            "candidate_ids": toolset.candidate_ids(limit=3),
+        }
+
+    @staticmethod
+    def _warning_event(code: str, message: str, **extra: Any) -> dict[str, Any]:
+        return {"event": "warning", "code": code, "message": message, **extra}
+
+    @staticmethod
     def _evidence_required_event(toolset: ResearchToolset) -> dict[str, Any]:
         candidates = [item.paper.id for item in toolset.retrieved_items[:3]]
         return {
@@ -346,6 +394,7 @@ class ResearchBriefAgent:
             "full_text_fetched": toolset.fulltext_success_count,
             "full_text_attempts": toolset.fulltext_attempt_count,
             "full_text_errors": toolset.fulltext_error_count,
+            "full_text_error_counts": toolset.fulltext_error_counts,
         }
 
     def _force_final(
@@ -359,14 +408,13 @@ class ResearchBriefAgent:
     ) -> str:
         """Ask the model for a final brief with tools disabled."""
         directive = (
-            system
-            + "\n\nYou have reached your tool budget. Write the final decision "
+            system + "\n\nYou have reached your tool budget. Write the final decision "
             "memo now using the evidence already gathered. Do not call any tools."
         )
         with self.tracer.span(trace, "forced_synthesis"):
             turn = self._run_llm_turn(
                 directive,
-                messages,
+                self._messages_for_turn(messages),
                 toolset.specs,
                 stage="forced_synthesis",
                 tool_choice="none",
@@ -378,8 +426,7 @@ class ResearchBriefAgent:
 
         brief, _fallback_usage = self._fallback_brief(request, toolset.retrieved_items)
         return (
-            brief
-            + "\n\nOperational note: forced synthesis returned tool-call markup, "
+            brief + "\n\nOperational note: forced synthesis returned tool-call markup, "
             "so this deterministic fallback was used."
         )
 
@@ -396,10 +443,174 @@ class ResearchBriefAgent:
         )
 
     @staticmethod
+    def _normalize_final_brief(text: str) -> str:
+        for marker in ("# Decision Memo", "## Decision Memo"):
+            index = text.find(marker)
+            if 0 < index <= 1000:
+                return text[index:].lstrip()
+        return text
+
+    @staticmethod
     def _accumulate(usage: UsageEstimate, turn) -> None:
         usage.llm_call_count += 1
         usage.input_tokens += turn.input_tokens
         usage.output_tokens += turn.output_tokens
+
+    # -- Transcript compaction ----------------------------------------------
+
+    def _messages_for_turn(self, messages: list[Message]) -> list[Message]:
+        """Return a provider transcript with older bulky tool payloads compacted.
+
+        Chat tool-use APIs require prior assistant tool calls to remain paired
+        with tool-result messages. We therefore keep the message structure
+        intact and only shrink older tool-result contents. The most recent tool
+        result stays raw so the model has one full turn to use fresh evidence.
+        """
+        keep_recent = max(0, self.settings.transcript_keep_recent_tool_results)
+        tool_result_indexes = [
+            index
+            for index, message in enumerate(messages)
+            if isinstance(message, ToolResultsMessage)
+        ]
+        keep_raw = set(tool_result_indexes[-keep_recent:]) if keep_recent else set()
+        compacted: list[Message] = []
+        for index, message in enumerate(messages):
+            if isinstance(message, ToolResultsMessage) and index not in keep_raw:
+                compacted.append(self._compact_tool_results_message(message))
+            else:
+                compacted.append(message)
+        return compacted
+
+    def _compact_tool_results_message(
+        self, message: ToolResultsMessage
+    ) -> ToolResultsMessage:
+        return ToolResultsMessage(
+            [
+                ToolResult(
+                    result.tool_call_id, self._compact_tool_result(result.content)
+                )
+                for result in message.results
+            ]
+        )
+
+    def _compact_tool_result(self, content: str) -> str:
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            return self._compact_text_payload(content)
+        if not isinstance(payload, dict):
+            return self._compact_text_payload(content)
+
+        compacted = self._compact_payload(payload)
+        return json.dumps(compacted)
+
+    def _compact_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        compacted: dict[str, Any] = {"compacted": True}
+        for key in (
+            "query",
+            "returned",
+            "new",
+            "already_known",
+            "hint",
+            "missing",
+            "error_counts",
+        ):
+            if key in payload:
+                compacted[key] = payload[key]
+
+        if isinstance(payload.get("papers"), list):
+            compacted["papers"] = [
+                self._compact_paper_payload(paper)
+                for paper in payload["papers"]
+                if isinstance(paper, dict)
+            ]
+            return compacted
+
+        if isinstance(payload.get("evidence"), list):
+            compacted["evidence"] = [
+                self._compact_evidence_payload(item)
+                for item in payload["evidence"]
+                if isinstance(item, dict)
+            ]
+            return compacted
+
+        if isinstance(payload.get("titles"), list):
+            compacted["titles"] = payload["titles"][:10]
+            return compacted
+
+        if isinstance(payload.get("errors"), list):
+            compacted["errors"] = payload["errors"][:10]
+            return compacted
+
+        compacted["summary"] = self._excerpt(
+            json.dumps(payload), self.settings.transcript_full_text_excerpt_chars
+        )
+        return compacted
+
+    def _compact_paper_payload(self, paper: dict[str, Any]) -> dict[str, Any]:
+        compacted = {
+            key: paper[key]
+            for key in (
+                "id",
+                "title",
+                "score",
+                "chars",
+                "truncated",
+                "error_code",
+                "error",
+                "status_code",
+            )
+            if key in paper
+        }
+        if "abstract" in paper:
+            compacted["abstract_excerpt"] = self._excerpt(
+                paper["abstract"], self.settings.transcript_abstract_excerpt_chars
+            )
+        if "full_text" in paper:
+            compacted["full_text_excerpt"] = self._excerpt(
+                paper["full_text"], self.settings.transcript_full_text_excerpt_chars
+            )
+            compacted["full_text_compacted"] = True
+        return compacted
+
+    def _compact_evidence_payload(self, evidence: dict[str, Any]) -> dict[str, Any]:
+        compacted = {
+            key: evidence[key]
+            for key in (
+                "id",
+                "title",
+                "authors",
+                "published",
+                "category",
+                "score",
+                "arxiv_url",
+            )
+            if key in evidence
+        }
+        if "abstract" in evidence:
+            compacted["abstract_excerpt"] = self._excerpt(
+                evidence["abstract"], self.settings.transcript_abstract_excerpt_chars
+            )
+        return compacted
+
+    def _compact_text_payload(self, text: str) -> str:
+        return json.dumps(
+            {
+                "compacted": True,
+                "summary": self._excerpt(
+                    text, self.settings.transcript_full_text_excerpt_chars
+                ),
+            }
+        )
+
+    @staticmethod
+    def _excerpt(value: Any, limit: int) -> str:
+        text = str(value)
+        if limit <= 0:
+            return ""
+        if len(text) <= limit:
+            return text
+        return text[:limit].rstrip() + "..."
 
     # -- Prompts --------------------------------------------------------------
 
@@ -411,6 +622,8 @@ class ResearchBriefAgent:
             "Workflow:\n"
             "1. Run at most TWO discovery rounds total using search_papers and "
             "fetch_arxiv. Do not repeat a search query you already ran.\n"
+            "Use descriptive, abstract-like search_papers queries rather than "
+            "keyword fragments.\n"
             "2. Call fetch_arxiv only if search_papers returned too few relevant "
             "results, then search once more.\n"
             "3. Once you have a handful of relevant papers, STOP searching. "
@@ -447,7 +660,13 @@ class ResearchBriefAgent:
     ) -> Iterator[dict[str, Any]]:
         with self.tracer.span(trace, "fallback_retrieval"):
             retrieval = self.tools.vector_retrieve(
-                request.research_question, request.max_papers
+                request.research_question,
+                request.max_papers,
+                embed_text=_build_search_embedding_text(
+                    request.research_question,
+                    request.research_question,
+                    request.constraints,
+                ),
             )
             if retrieval.diagnostics.returned == 0:
                 ingested, papers = self.tools.fetch_and_ingest(
@@ -457,7 +676,13 @@ class ResearchBriefAgent:
                 )
                 if ingested:
                     retrieval = self.tools.vector_retrieve(
-                        request.research_question, request.max_papers
+                        request.research_question,
+                        request.max_papers,
+                        embed_text=_build_search_embedding_text(
+                            request.research_question,
+                            request.research_question,
+                            request.constraints,
+                        ),
                     )
         yield {
             "event": "retrieval_complete",
@@ -475,10 +700,17 @@ class ResearchBriefAgent:
 
         warnings: list[str] = []
         if error:
-            warnings.append("LLM provider error; deterministic fallback memo returned.")
+            warning = "LLM provider error; deterministic fallback memo returned."
+            warnings.append(warning)
+            yield self._warning_event("provider_fallback", warning)
         if retrieval.diagnostics.returned < max(2, min(4, request.max_papers)):
-            warnings.append(
-                "Retrieved evidence is thin; the brief uses explicit uncertainty."
+            warning = "Retrieved evidence is thin; the brief uses explicit uncertainty."
+            warnings.append(warning)
+            yield self._warning_event(
+                "thin_evidence",
+                warning,
+                retrieved=retrieval.diagnostics.returned,
+                requested=request.max_papers,
             )
         usage.estimated_cost_usd = _estimate_cost(
             self.settings, usage.input_tokens, usage.output_tokens

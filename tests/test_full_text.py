@@ -1,6 +1,7 @@
 import json
 
 import numpy as np
+import pytest
 
 from src.agent import ResearchTools
 from src.agent.toolset import ResearchToolset
@@ -11,7 +12,10 @@ from src.settings import Settings
 
 
 class FakeEmbedder:
-    def encode_texts(self, texts, batch_size=32, show_progress_bar=False):
+    def encode_documents(self, texts, batch_size=32):
+        return np.array([[1.0, 0.0] for _ in texts])
+
+    def encode_queries(self, texts, batch_size=32):
         return np.array([[1.0, 0.0] for _ in texts])
 
 
@@ -23,6 +27,32 @@ def test_fetch_arxiv_fulltext_truncates(monkeypatch):
 
     assert len(text) == 1000
     assert truncated is True
+
+
+def test_fetch_arxiv_fulltext_classifies_empty_extraction(monkeypatch):
+    monkeypatch.setattr(full_text, "_download", lambda url, timeout: b"pdf-bytes")
+    monkeypatch.setattr(full_text, "_extract_text", lambda data, budget: "   ")
+
+    with pytest.raises(full_text.FullTextFetchError) as exc_info:
+        full_text.fetch_arxiv_fulltext("https://arxiv.org/pdf/2401.00001")
+
+    assert exc_info.value.code == "empty_text"
+    assert "returned no text" in exc_info.value.message
+
+
+def test_fetch_arxiv_fulltext_classifies_timeout(monkeypatch):
+    import httpx
+
+    def timeout(*args, **kwargs):
+        raise httpx.TimeoutException("slow")
+
+    monkeypatch.setattr(httpx, "get", timeout)
+
+    with pytest.raises(full_text.FullTextFetchError) as exc_info:
+        full_text.fetch_arxiv_fulltext("https://arxiv.org/pdf/2401.00001", timeout=0.1)
+
+    assert exc_info.value.code == "timeout"
+    assert "Timed out" in exc_info.value.message
 
 
 def _toolset_with_paper():
@@ -47,9 +77,13 @@ def _toolset_with_paper():
         np.array([[1.0, 0.0]]),
     )
     tools = ResearchTools(settings, object(), FakeEmbedder(), store)
-    toolset = ResearchToolset(tools, BriefRequest(research_question="grounding test", max_papers=1))
+    toolset = ResearchToolset(
+        tools, BriefRequest(research_question="grounding test", max_papers=1)
+    )
     # Prime the retrieved set so the toolset knows the paper + its pdf_url.
-    toolset.call(ToolCall(id="s", name="search_papers", arguments={"query": "grounding", "k": 1}))
+    toolset.call(
+        ToolCall(id="s", name="search_papers", arguments={"query": "grounding", "k": 1})
+    )
     return toolset
 
 
@@ -105,7 +139,9 @@ def test_get_full_text_tool_returns_body_and_caches(monkeypatch):
     assert payload["papers"][0]["title"] == "Retrieval Grounding"
 
     # Second call for the same id must hit the cache, not refetch.
-    toolset.call(ToolCall(id="f2", name="get_full_text", arguments={"paper_ids": ["2401.00001"]}))
+    toolset.call(
+        ToolCall(id="f2", name="get_full_text", arguments={"paper_ids": ["2401.00001"]})
+    )
     assert calls["n"] == 1
 
 
@@ -150,7 +186,28 @@ def test_get_full_text_reports_error_without_failing(monkeypatch):
     assert toolset.fulltext_success_count == 0
     assert toolset.fulltext_attempt_count == 1
     assert toolset.fulltext_error_count == 1
-    assert "error" in payload["papers"][0]
+    assert payload["papers"][0]["error_code"] == "unknown"
+    assert payload["error_counts"] == {"unknown": 1}
+    assert meta["error_counts"] == {"unknown": 1}
+
+
+def test_get_full_text_reports_bad_id_error_category():
+    toolset = _toolset_with_paper()
+
+    content, meta = toolset.call(
+        ToolCall(id="f", name="get_full_text", arguments={"paper_ids": ["missing-id"]})
+    )
+    payload = json.loads(content)
+
+    assert meta == {"fetched": 0, "error_counts": {"bad_id": 1}}
+    assert payload["missing"] == ["missing-id"]
+    assert payload["errors"][0]["error_code"] == "bad_id"
+    assert toolset.fulltext_error_count == 1
+    assert toolset.fulltext_error_counts == {"bad_id": 1}
+    diagnostics = toolset.fulltext_diagnostics()
+    assert diagnostics.failed == 1
+    assert diagnostics.error_counts == {"bad_id": 1}
+    assert diagnostics.missing_ids == ["missing-id"]
 
 
 def test_toolset_resolves_unversioned_arxiv_ids(monkeypatch):

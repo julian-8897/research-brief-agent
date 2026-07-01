@@ -15,12 +15,12 @@ def main():
 
     papers = client.search_papers("cat:cs.AI", max_results=100)
 
-    title_embeddings = embedder.encode_papers(papers, field="title")
+    title_embeddings = embedder.encode_documents([paper["title"] for paper in papers])
 
     store = VectorStore(title_embeddings.shape[1])
     store.add_papers(papers, title_embeddings)
 
-    query_embedding = embedder.encode_texts(["diffusion model"])
+    query_embedding = embedder.encode_queries(["diffusion model"])
     results = store.search(query_embedding[0], k=5)
 
     print(len(results))

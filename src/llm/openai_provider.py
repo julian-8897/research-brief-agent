@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 from src.llm.base import (
     AssistantMessage,
@@ -78,6 +79,8 @@ class OpenAICompatibleProvider:
                 for t in tools
             ]
             kwargs["tool_choice"] = tool_choice
+        if self._should_disable_deepseek_thinking():
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
         completion = client.chat.completions.create(**kwargs)
         choice = completion.choices[0]
@@ -101,6 +104,23 @@ class OpenAICompatibleProvider:
             output_tokens=getattr(usage, "completion_tokens", 0),
             model=self.model,
             stop_reason="tool_calls" if tool_calls else "end",
+        )
+
+    def _should_disable_deepseek_thinking(self) -> bool:
+        """Use standard assistant content for DeepSeek V4 flash agent calls.
+
+        DeepSeek V4 flash currently defaults to a thinking response mode where
+        small completions can spend the whole budget in ``reasoning_content`` and
+        return empty ``content``. This agent expects normal Chat Completions text
+        and tool calls, so disable thinking only for the official DeepSeek API
+        and V4 model family.
+        """
+
+        if not self._base_url:
+            return False
+        hostname = urlparse(self._base_url).hostname or ""
+        return hostname.endswith("deepseek.com") and self.model.lower().startswith(
+            "deepseek-v4"
         )
 
     @staticmethod

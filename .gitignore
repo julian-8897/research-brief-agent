@@ -150,6 +150,8 @@ activemq-data/
 # Environments
 .env
 .envrc
+.qdrant-initialized
+.local/
 .venv
 env/
 venv/

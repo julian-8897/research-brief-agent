@@ -20,7 +20,11 @@ from src.llm import (
     UserMessage,
 )
 
-_TOOLS = [ToolSpec(name="search_papers", description="search", input_schema={"type": "object"})]
+_TOOLS = [
+    ToolSpec(
+        name="search_papers", description="search", input_schema={"type": "object"}
+    )
+]
 _TRANSCRIPT = [
     UserMessage("research question"),
     AssistantMessage(
@@ -45,7 +49,12 @@ def test_anthropic_translation_and_parsing(monkeypatch):
         return _obj(
             content=[
                 _obj(type="text", text="thinking"),
-                _obj(type="tool_use", id="tu1", name="search_papers", input={"query": "y"}),
+                _obj(
+                    type="tool_use",
+                    id="tu1",
+                    name="search_papers",
+                    input={"query": "y"},
+                ),
             ],
             stop_reason="tool_use",
             usage=_obj(input_tokens=11, output_tokens=7),
@@ -96,9 +105,7 @@ def test_anthropic_tool_choice_none_keeps_tools_visible(monkeypatch):
     provider = AnthropicProvider(
         api_key="k", model="claude-x", max_tokens=100, temperature=0.1
     )
-    result = provider.run_turn(
-        "system prompt", _TRANSCRIPT, _TOOLS, tool_choice="none"
-    )
+    result = provider.run_turn("system prompt", _TRANSCRIPT, _TOOLS, tool_choice="none")
 
     assert captured["tools"][0]["name"] == "search_papers"
     assert captured["tool_choice"] == {"type": "none"}
@@ -145,6 +152,7 @@ def test_openai_translation_and_parsing(monkeypatch):
     assert payload[3]["tool_call_id"] == "c1"
     assert captured["tools"][0]["type"] == "function"
     assert captured["tool_choice"] == "auto"
+    assert "extra_body" not in captured
 
     # Response: JSON arguments parsed to a dict, usage measured.
     assert result.stop_reason == "tool_calls"
@@ -173,10 +181,38 @@ def test_openai_tool_choice_none_keeps_tools_visible(monkeypatch):
     provider = OpenAICompatibleProvider(
         api_key="k", model="gpt-x", max_tokens=100, temperature=0.1
     )
-    result = provider.run_turn(
-        "system prompt", _TRANSCRIPT, _TOOLS, tool_choice="none"
-    )
+    result = provider.run_turn("system prompt", _TRANSCRIPT, _TOOLS, tool_choice="none")
 
     assert captured["tools"][0]["type"] == "function"
     assert captured["tool_choice"] == "none"
     assert result.text == "final"
+
+
+def test_openai_deepseek_v4_disables_thinking(monkeypatch):
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        message = _obj(content="READY - DeepSeek", tool_calls=[])
+        return _obj(
+            choices=[_obj(message=message)],
+            usage=_obj(prompt_tokens=19, completion_tokens=6),
+        )
+
+    fake = types.ModuleType("openai")
+    fake.OpenAI = lambda api_key=None, base_url=None: _obj(
+        chat=_obj(completions=_obj(create=create))
+    )
+    monkeypatch.setitem(sys.modules, "openai", fake)
+
+    provider = OpenAICompatibleProvider(
+        api_key="k",
+        model="deepseek-v4-flash",
+        max_tokens=100,
+        temperature=0.1,
+        base_url="https://api.deepseek.com",
+    )
+    result = provider.run_turn("system prompt", [UserMessage("ping")], [])
+
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert result.text == "READY - DeepSeek"

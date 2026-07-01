@@ -1,0 +1,71 @@
+# Fly deployment commands:
+#
+#   fly auth login
+#   fly apps create research-brief-agent
+#   fly volumes create qdrant_data --region lhr --size 3 --app research-brief-agent
+#   export DEMO_API_KEY="$(openssl rand -hex 32)"
+#   fly secrets set --app research-brief-agent \
+#     ENVIRONMENT=production \
+#     API_KEYS="$DEMO_API_KEY" \
+#     LLM_PROVIDER=anthropic \
+#     ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
+#   fly deploy --app research-brief-agent
+#   curl https://research-brief-agent.fly.dev/health
+#   curl -N -X POST https://research-brief-agent.fly.dev/briefs/stream \
+#     -H "content-type: application/json" \
+#     -H "X-API-Key: $DEMO_API_KEY" \
+#     -d '{"research_question":"What methods help retrieval-grounded literature review?","max_papers":3}'
+#
+# For an OpenAI-compatible backend, use:
+#
+#   fly secrets set --app research-brief-agent \
+#     LLM_PROVIDER=openai \
+#     OPENAI_API_KEY="$OPENAI_API_KEY" \
+#     OPENAI_BASE_URL="$OPENAI_BASE_URL"
+
+app = "research-brief-agent"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_NAME = "research-brief-agent"
+  ENVIRONMENT = "production"
+  QDRANT_URL = "http://127.0.0.1:6333"
+  QDRANT_COLLECTION = "arxiv_papers"
+  VECTOR_STORE_BACKEND = "qdrant"
+  EMBEDDING_MODEL = "allenai/specter2_base"
+  EMBEDDING_DOCUMENT_ADAPTER = "allenai/specter2"
+  EMBEDDING_QUERY_ADAPTER = "allenai/specter2_adhoc_query"
+  API_KEY_HEADER_NAME = "X-API-Key"
+  RATE_LIMIT_REQUESTS = "20"
+  RATE_LIMIT_WINDOW_SECONDS = "60"
+  AGENT_MAX_ITERATIONS = "8"
+  AGENT_MAX_TOOL_CALLS = "12"
+  AGENT_MAX_SEARCH_CALLS = "3"
+  FULL_TEXT_CHAR_BUDGET = "12000"
+  FULL_TEXT_MAX_PAPERS = "3"
+  FULL_TEXT_TOTAL_PAPER_BUDGET = "3"
+  FULL_TEXT_TIMEOUT_S = "20"
+
+[mounts]
+  source = "qdrant_data"
+  destination = "/qdrant/storage"
+
+[processes]
+  app = "docker/fly-start.sh"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "45s"
+    method = "GET"
+    path = "/health"

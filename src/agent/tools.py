@@ -47,14 +47,22 @@ class ResearchTools:
             date_range=request.date_range,
         )
 
-    def vector_retrieve(self, query: str, k: int) -> RetrievalResult:
+    def vector_retrieve(
+        self, query: str, k: int, *, embed_text: str | None = None
+    ) -> RetrievalResult:
         started = time.perf_counter()
-        query_embedding = self.embedder.encode_texts(
-            [query], batch_size=self.settings.embedding_batch_size
+        query_embedding = self.embedder.encode_queries(
+            [embed_text or query], batch_size=self.settings.embedding_batch_size
         )[0]
         items = self.vector_store.search(
             query_embedding, k=min(k, self.settings.max_retrieval_results)
         )
+        if self.settings.retrieval_min_score > 0.0:
+            items = [
+                item
+                for item in items
+                if item.score >= self.settings.retrieval_min_score
+            ]
         latency_ms = (time.perf_counter() - started) * 1000
         scores = [item.score for item in items]
         return RetrievalResult(
@@ -87,7 +95,7 @@ class ResearchTools:
         if not papers:
             return 0
         texts = [build_paper_embedding_text(paper.model_dump()) for paper in papers]
-        embeddings = self.embedder.encode_texts(
+        embeddings = self.embedder.encode_documents(
             texts, batch_size=self.settings.embedding_batch_size
         )
         return self.vector_store.upsert(papers, embeddings)

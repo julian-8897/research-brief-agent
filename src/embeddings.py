@@ -1,3 +1,5 @@
+from threading import Lock
+
 import numpy as np
 
 
@@ -9,56 +11,85 @@ def build_paper_embedding_text(paper: dict) -> str:
 
 
 class TextEmbedder:
-    """
-    Generates text embeddings for semantic search using a SentenceTransformer model.
+    """Generates asymmetric SPECTER2 embeddings for documents and queries."""
 
-    Args:
-        model_name (str): Name of the sentence transformer model to use.
-
-    Attributes:
-        model_name (str): The name of the transformer model.
-        model (SentenceTransformer): The loaded sentence transformer model.
-    """
-
-    def __init__(self, model_name: str = "sentence-transformers/allenai-specter"):
-        """
-        Initializes the TextEmbedder with the specified model.
-
-        Args:
-            model_name (str): Name of the sentence transformer model to use.
-        """
+    def __init__(
+        self,
+        model_name: str = "allenai/specter2_base",
+        *,
+        document_adapter: str = "allenai/specter2",
+        query_adapter: str = "allenai/specter2_adhoc_query",
+        document_adapter_name: str = "proximity",
+        query_adapter_name: str = "adhoc_query",
+    ):
         self.model_name = model_name
+        self.document_adapter = document_adapter
+        self.query_adapter = query_adapter
+        self.document_adapter_name = document_adapter_name
+        self.query_adapter_name = query_adapter_name
         self._model = None
+        self._tokenizer = None
+        self._adapter_lock = Lock()
 
-    @property
-    def model(self):
+    def _ensure_loaded(self) -> None:
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
+            with self._adapter_lock:
+                if self._model is not None:
+                    return
+                from adapters import AutoAdapterModel
+                from transformers import AutoTokenizer
 
-            self._model = SentenceTransformer(self.model_name)
-        return self._model
+                self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                self._model = AutoAdapterModel.from_pretrained(self.model_name)
+                self._model.load_adapter(
+                    self.document_adapter, load_as=self.document_adapter_name
+                )
+                self._model.load_adapter(
+                    self.query_adapter, load_as=self.query_adapter_name
+                )
+                self._model.eval()
 
-    def encode_texts(
-        self, texts: list[str], batch_size: int = 32, show_progress_bar: bool = False
+    def encode_documents(
+        self, texts: list[str], batch_size: int = 32
     ) -> np.ndarray:
-        """
-        Encodes a list of texts into embeddings.
-
-        Args:
-            texts (List[str]): List of text strings to encode.
-            batch_size (int): Batch size for encoding.
-
-        Returns:
-            np.ndarray: Array of embeddings for the input texts.
-        """
-        embeddings = self.model.encode(
-            texts,
-            batch_size=batch_size,
-            show_progress_bar=show_progress_bar,
-            convert_to_numpy=True,
+        """Encode paper title/abstract texts with the SPECTER2 proximity adapter."""
+        return self._encode(
+            texts, batch_size=batch_size, adapter_name=self.document_adapter_name
         )
 
-        return embeddings
+    def encode_queries(self, texts: list[str], batch_size: int = 32) -> np.ndarray:
+        """Encode natural-language search queries with the SPECTER2 query adapter."""
+        return self._encode(
+            texts, batch_size=batch_size, adapter_name=self.query_adapter_name
+        )
+
+    def _encode(
+        self, texts: list[str], *, batch_size: int, adapter_name: str
+    ) -> np.ndarray:
+        self._ensure_loaded()
+        if not texts:
+            return np.empty((0, 768), dtype="float32")
+
+        import torch
+
+        embeddings = []
+        for start in range(0, len(texts), batch_size):
+            batch = texts[start : start + batch_size]
+            inputs = self._tokenizer(
+                batch,
+                truncation=True,
+                max_length=512,
+                padding=True,
+                return_tensors="pt",
+            )
+            device = next(self._model.parameters()).device
+            inputs = {key: value.to(device) for key, value in inputs.items()}
+            with self._adapter_lock, torch.inference_mode():
+                self._model.set_active_adapters(adapter_name)
+                output = self._model(**inputs)
+            embeddings.append(output.last_hidden_state[:, 0, :].detach().cpu().numpy())
+
+        return np.concatenate(embeddings, axis=0)
 
     def encode_papers(self, papers: list[dict], field: str = "title") -> np.ndarray:
         """
@@ -83,4 +114,4 @@ class TextEmbedder:
         else:
             raise ValueError("field must be 'title', 'summary', or 'title_summary'")
 
-        return self.encode_texts(texts)
+        return self.encode_documents(texts)

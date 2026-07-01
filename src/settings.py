@@ -34,16 +34,30 @@ def _float_env(name: str, default: float) -> float:
         raise ValueError(f"{name} must be a float") from exc
 
 
+def _csv_env(name: str) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if not value:
+        return ()
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "research-brief-agent")
     environment: str = os.getenv("ENVIRONMENT", "local")
 
+    api_keys: tuple[str, ...] = _csv_env("API_KEYS")
+    api_key_header_name: str = os.getenv("API_KEY_HEADER_NAME", "X-API-Key")
+    rate_limit_requests: int = _int_env("RATE_LIMIT_REQUESTS", 20)
+    rate_limit_window_seconds: int = _int_env("RATE_LIMIT_WINDOW_SECONDS", 60)
+
     # Synthesis backend: "anthropic" (native Claude) or "openai"
     # (OpenAI Chat Completions-compatible: OpenAI, local models, OpenRouter,
     # codex/opencode-style gateways via OPENAI_BASE_URL).
     llm_provider: str = os.getenv("LLM_PROVIDER", "anthropic")
-    llm_max_tokens: int = _int_env("LLM_MAX_TOKENS", _int_env("CLAUDE_MAX_TOKENS", 1800))
+    llm_max_tokens: int = _int_env(
+        "LLM_MAX_TOKENS", _int_env("CLAUDE_MAX_TOKENS", 1800)
+    )
     llm_temperature: float = _float_env("LLM_TEMPERATURE", 0.2)
 
     # Agent loop guardrails: bound how many model turns and tool calls a single
@@ -51,6 +65,19 @@ class Settings:
     agent_max_iterations: int = _int_env("AGENT_MAX_ITERATIONS", 8)
     agent_max_tool_calls: int = _int_env("AGENT_MAX_TOOL_CALLS", 12)
     agent_max_search_calls: int = _int_env("AGENT_MAX_SEARCH_CALLS", 3)
+
+    # Transcript compaction: each provider turn must include the prior
+    # tool-call/tool-result pairs, but older bulky payloads can be replaced with
+    # bounded summaries once the model has seen them.
+    transcript_keep_recent_tool_results: int = _int_env(
+        "TRANSCRIPT_KEEP_RECENT_TOOL_RESULTS", 1
+    )
+    transcript_full_text_excerpt_chars: int = _int_env(
+        "TRANSCRIPT_FULL_TEXT_EXCERPT_CHARS", 2500
+    )
+    transcript_abstract_excerpt_chars: int = _int_env(
+        "TRANSCRIPT_ABSTRACT_EXCERPT_CHARS", 500
+    )
 
     # Full-text evidence tool: how much paper body the agent may pull per paper,
     # how many papers per call and per run, plus the PDF fetch timeout.
@@ -68,8 +95,12 @@ class Settings:
     openai_model: str = os.getenv("OPENAI_MODEL", "deepseek-v4-flash")
     openai_base_url: str | None = os.getenv("OPENAI_BASE_URL")
 
-    embedding_model: str = os.getenv(
-        "EMBEDDING_MODEL", "sentence-transformers/allenai-specter"
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "allenai/specter2_base")
+    embedding_query_adapter: str = os.getenv(
+        "EMBEDDING_QUERY_ADAPTER", "allenai/specter2_adhoc_query"
+    )
+    embedding_document_adapter: str = os.getenv(
+        "EMBEDDING_DOCUMENT_ADAPTER", "allenai/specter2"
     )
     embedding_batch_size: int = _int_env("EMBEDDING_BATCH_SIZE", 16)
     embedding_dimension: int = _int_env("EMBEDDING_DIMENSION", 768)
@@ -86,6 +117,7 @@ class Settings:
     default_max_papers: int = _int_env("DEFAULT_MAX_PAPERS", 12)
     max_ingest_results: int = _int_env("MAX_INGEST_RESULTS", 200)
     max_retrieval_results: int = _int_env("MAX_RETRIEVAL_RESULTS", 20)
+    retrieval_min_score: float = _float_env("RETRIEVAL_MIN_SCORE", 0.0)
     estimated_input_token_cost_per_1k: float = _float_env(
         "ESTIMATED_INPUT_TOKEN_COST_PER_1K", 0.003
     )
