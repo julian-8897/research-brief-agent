@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 
-from src.arxiv_client import ArxivClient
+from src.arxiv_client import ArxivClient, resolve_sort_criterion
 from src.models import DateRange, PaperRecord
 
 # arXiv field prefixes (https://info.arxiv.org/help/api/user-manual.html).
@@ -44,8 +44,12 @@ def fetch_arxiv_papers(
     query: str,
     max_papers: int,
     date_range: DateRange | None = None,
+    sort: str | None = None,
 ) -> list[PaperRecord]:
     full_query = build_arxiv_query(query, date_range)
     return [
-        PaperRecord(**paper) for paper in client.search_papers(full_query, max_papers)
+        PaperRecord(**paper)
+        for paper in client.search_papers(
+            full_query, max_papers, sort_by=resolve_sort_criterion(sort)
+        )
     ]

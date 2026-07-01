@@ -45,6 +45,7 @@ class ResearchTools:
             query=query,
             max_papers=min(request.max_papers, self.settings.max_ingest_results),
             date_range=request.date_range,
+            sort=self.settings.arxiv_sort,
         )
 
     def vector_retrieve(
@@ -88,6 +89,7 @@ class ResearchTools:
             query=query,
             max_papers=min(max_papers, self.settings.max_ingest_results),
             date_range=date_range,
+            sort=self.settings.arxiv_sort,
         )
         return self.ingest_papers(papers), papers
 

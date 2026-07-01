@@ -597,4 +597,5 @@ class ResearchToolset:
             failed=self.fulltext_error_count,
             error_counts=self.fulltext_error_counts,
             missing_ids=sorted(self._fulltext_missing_ids),
+            succeeded_ids=sorted(self._fulltext_success_ids),
         )

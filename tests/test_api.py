@@ -23,7 +23,7 @@ class FakeEmbedder:
 
 
 class FakeArxivClient:
-    def search_papers(self, query, max_results):
+    def search_papers(self, query, max_results, sort_by=None):
         return [
             {
                 "id": "2501.00001",
@@ -38,12 +38,12 @@ class FakeArxivClient:
 
 
 class FailingArxivClient:
-    def search_papers(self, query, max_results):
+    def search_papers(self, query, max_results, sort_by=None):
         raise arxiv.HTTPError("https://export.arxiv.org/api/query", 0, 500)
 
 
 class NetworkFailingArxivClient:
-    def search_papers(self, query, max_results):
+    def search_papers(self, query, max_results, sort_by=None):
         raise requests.ConnectionError("connection aborted")
 
 

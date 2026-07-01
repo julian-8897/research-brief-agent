@@ -13,10 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from evals import metrics
 from src.agent import ResearchBriefAgent, ResearchTools
 from src.agent import toolset as toolset_module
 from src.arxiv_client import ArxivClient
 from src.embeddings import TextEmbedder
+from src.llm import build_llm_provider
 from src.models import BriefRequest, PaperRecord
 from src.observability import Tracer
 from src.retrieval import InMemoryVectorStore, build_vector_store
@@ -99,17 +101,67 @@ def render_markdown(rows: list[dict]) -> str:
                 trace="yes" if final.get("langfuse_trace_url") else "no",
             )
         )
-    lines.extend(
-        [
-            "",
-            "Judge checks to run on reviewed outputs:",
-            "- Answer relevance to the research question.",
-            "- Citation grounding against supplied titles and abstracts.",
-            "- Unsupported-claim risk.",
-            "- Useful uncertainty or refusal behavior when evidence is weak.",
-        ]
-    )
+
+    metric_rows = [row["metrics"] for row in rows if "metrics" in row]
+    if metric_rows:
+        lines.extend(
+            [
+                "",
+                "## Quality metrics (automated)",
+                "",
+                "| Case | Cited | Valid ids | Halluc. | Read-in-full | Uncertainty | Cite support (LLM) | Faithfulness | Answer rel. |",
+                "|---|---:|---:|---:|---:|---|---:|---:|---:|",
+            ]
+        )
+        for row in rows:
+            metric = row.get("metrics")
+            if not metric:
+                continue
+            grounding = metric["citation_grounding"]
+            uncertainty = metric["uncertainty_signaling"]
+            judge = row.get("judge") or {}
+            faith = judge.get("faithfulness") or {}
+            cite_judge = judge.get("citation_grounding") or {}
+            lines.append(
+                "| {case} | {cited} | {grounded:.0%} | {halluc} | {read:.0%} | {unc} | {support} | {faith} | {rel} |".format(
+                    case=row["id"],
+                    cited=len(grounding["cited"]),
+                    grounded=grounding["grounding_rate"],
+                    halluc=len(grounding["hallucinated"]),
+                    read=grounding["full_text_rate"],
+                    unc="ok" if uncertainty["appropriate"] else "MISSING",
+                    support=_fmt_ratio(cite_judge.get("grounded_rate")),
+                    faith=_fmt_ratio(faith.get("faithfulness")),
+                    rel=_fmt_ratio(faith.get("answer_relevance")),
+                )
+            )
+
+        summary = metrics.aggregate(metric_rows)
+        lines.extend(
+            [
+                "",
+                "## Aggregate",
+                "",
+                f"- Cases: {summary['cases']}",
+                f"- Mean citation grounding: {summary['mean_grounding_rate']:.0%}",
+                f"- Mean hallucination rate: {summary['mean_hallucination_rate']:.0%} "
+                f"({summary['cases_with_hallucinations']} case(s) with fabricated ids)",
+                f"- Mean cited-papers-read-in-full: {summary['mean_full_text_rate']:.0%}",
+                f"- Mean full-text fetch success: {summary['mean_full_text_success']:.0%}",
+                f"- Uncertainty signaled appropriately: "
+                f"{summary['uncertainty_appropriate_rate']:.0%} of cases",
+            ]
+        )
     return "\n".join(lines) + "\n"
+
+
+def _fmt_ratio(value) -> str:
+    if value is None:
+        return "-"
+    try:
+        return f"{float(value):.0%}"
+    except (TypeError, ValueError):
+        return "-"
 
 
 def build_fixture_agent(fixture_path: Path, *, live_llm: bool) -> ResearchBriefAgent:
@@ -156,7 +208,8 @@ def build_fixture_agent(fixture_path: Path, *, live_llm: bool) -> ResearchBriefA
         embedder=embedder,
         vector_store=vector_store,
     )
-    return ResearchBriefAgent(settings=settings, tools=tools, tracer=Tracer(settings))
+    agent = ResearchBriefAgent(settings=settings, tools=tools, tracer=Tracer(settings))
+    return agent, paper_by_id
 
 
 def main():
@@ -196,15 +249,25 @@ def main():
         type=Path,
         default=Path("evals/benchmarks/fixture_papers.jsonl"),
     )
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help=(
+            "Also run an LLM-graded faithfulness/answer-relevance judge "
+            "(requires a configured provider key)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.offline_fixture and args.fixture_corpus:
         raise SystemExit("Use only one of --offline-fixture or --fixture-corpus")
 
     if args.offline_fixture:
-        agent = build_fixture_agent(args.fixture_papers, live_llm=False)
+        agent, paper_by_id = build_fixture_agent(args.fixture_papers, live_llm=False)
+        settings = agent.settings
     elif args.fixture_corpus:
-        agent = build_fixture_agent(args.fixture_papers, live_llm=True)
+        agent, paper_by_id = build_fixture_agent(args.fixture_papers, live_llm=True)
+        settings = agent.settings
     else:
         settings = get_settings()
         vector_store = build_vector_store(settings)
@@ -221,6 +284,11 @@ def main():
         agent = ResearchBriefAgent(
             settings=settings, tools=tools, tracer=Tracer(settings)
         )
+        paper_by_id = {}
+
+    judge_provider = build_llm_provider(settings) if args.judge else None
+    if args.judge and judge_provider is None:
+        print("warning: --judge requested but no provider configured; skipping judge")
 
     rows = []
     args.jsonl.parent.mkdir(parents=True, exist_ok=True)
@@ -229,15 +297,50 @@ def main():
             request = BriefRequest(**case)
             started = time.perf_counter()
             final = asyncio.run(_collect(agent, request))
+            # Legitimate corpus: the fixture ids when known, else the ids the
+            # system itself recognized as citations (a weaker live-run signal).
+            known_ids = (
+                set(paper_by_id)
+                if paper_by_id
+                else {p["id"] for p in final.get("cited_papers", [])}
+            )
+            case_metrics = metrics.score_case(final, known_ids)
             row = {
                 "id": case.get("id", request.research_question[:40]),
                 "elapsed_ms": (time.perf_counter() - started) * 1000,
                 "final": final,
+                "metrics": case_metrics,
             }
+            if judge_provider is not None:
+                row["judge"] = _run_judge(
+                    judge_provider, request, final, paper_by_id
+                )
             rows.append(row)
             handle.write(json.dumps(row) + "\n")
 
     args.markdown.write_text(render_markdown(rows), encoding="utf-8")
+
+
+def _run_judge(provider, request, final, paper_by_id):
+    """Grade the brief with LLM judges: whole-brief faithfulness and per-citation
+    grounding."""
+    brief = final.get("final_brief", "")
+    evidence_by_id = {}
+    for cid in metrics.extract_citations(brief):
+        paper = paper_by_id.get(cid) or paper_by_id.get(cid.split("v")[0])
+        if paper is not None:
+            evidence_by_id[cid] = {"title": paper.title, "text": paper.summary}
+    if not evidence_by_id:
+        return {"error": "no citable evidence available for judging"}
+    faith_evidence = [{"id": cid, **ev} for cid, ev in evidence_by_id.items()]
+    return {
+        "faithfulness": metrics.faithfulness_judge(
+            provider, request.research_question, brief, faith_evidence
+        ),
+        "citation_grounding": metrics.citation_grounding_judge(
+            provider, brief, evidence_by_id
+        ),
+    }
 
 
 if __name__ == "__main__":

@@ -10,6 +10,29 @@ from typing import Any
 import arxiv
 import pandas as pd
 
+_SORT_CRITERIA = {
+    "relevance": arxiv.SortCriterion.Relevance,
+    "submitted_date": arxiv.SortCriterion.SubmittedDate,
+    "last_updated": arxiv.SortCriterion.LastUpdatedDate,
+}
+
+
+def resolve_sort_criterion(name: str | None) -> arxiv.SortCriterion:
+    """Map a config string to an arXiv sort criterion, defaulting to relevance.
+
+    Relevance is the sensible default for research briefs: sorting by submission
+    date silently biases the corpus toward the newest papers and can drop the
+    most relevant (often older, seminal) work.
+    """
+    if not name:
+        return arxiv.SortCriterion.Relevance
+    try:
+        return _SORT_CRITERIA[name.strip().lower()]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown arxiv sort '{name}'; expected one of {sorted(_SORT_CRITERIA)}"
+        ) from exc
+
 
 class ArxivClient:
     """
@@ -42,7 +65,7 @@ class ArxivClient:
         self,
         query: str = "cat:astro-ph.GA",
         max_results: int = 100,
-        sort_by: arxiv.SortCriterion = arxiv.SortCriterion.SubmittedDate,
+        sort_by: arxiv.SortCriterion = arxiv.SortCriterion.Relevance,
     ) -> list[dict]:
         """
         Search arXiv for papers matching a query.
@@ -74,7 +97,12 @@ class ArxivClient:
         start_date = end_date - timedelta(days=days)
 
         query = f"cat:{category} AND submittedDate:[{start_date.strftime('%Y%m%d')}* TO {end_date.strftime('%Y%m%d')}*]"
-        return self.search_papers(query=query, max_results=50)
+        # This helper is about recency, so keep it ordered newest-first.
+        return self.search_papers(
+            query=query,
+            max_results=50,
+            sort_by=arxiv.SortCriterion.SubmittedDate,
+        )
 
     def papers_to_dataframe(self, papers: list[dict]) -> pd.DataFrame:
         """

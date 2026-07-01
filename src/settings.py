@@ -119,6 +119,10 @@ class Settings:
 
     default_max_papers: int = _int_env("DEFAULT_MAX_PAPERS", 12)
     max_ingest_results: int = _int_env("MAX_INGEST_RESULTS", 200)
+    # How arXiv fetches are ordered: "relevance" (default), "submitted_date",
+    # or "last_updated". Relevance avoids biasing the corpus toward the newest
+    # submissions and missing seminal older work; use a date sort for recency.
+    arxiv_sort: str = os.getenv("ARXIV_SORT", "relevance")
     max_retrieval_results: int = _int_env("MAX_RETRIEVAL_RESULTS", 20)
     retrieval_min_score: float = _float_env("RETRIEVAL_MIN_SCORE", 0.0)
     estimated_input_token_cost_per_1k: float = _float_env(

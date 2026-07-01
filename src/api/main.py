@@ -281,6 +281,7 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
                 query=request.query,
                 max_papers=max_papers,
                 date_range=request.date_range,
+                sort=services.settings.arxiv_sort,
             )
         except ValueError as exc:
             raise HTTPException(

@@ -74,6 +74,7 @@ class FullTextDiagnostics(BaseModel):
     failed: int = 0
     error_counts: dict[str, int] = Field(default_factory=dict)
     missing_ids: list[str] = Field(default_factory=list)
+    succeeded_ids: list[str] = Field(default_factory=list)
 
 
 class UsageEstimate(BaseModel):

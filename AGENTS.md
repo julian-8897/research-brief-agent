@@ -17,7 +17,9 @@ uv run pytest tests/test_agent.py::test_agent_runs_tool_loop_and_reports_measure
 uv run ruff check .                # lint
 uv run ruff format .               # format
 uv run uvicorn src.api.main:app --reload   # run API locally (in-memory store if Qdrant absent)
-uv run python evals/run_eval.py    # latency/cost benchmark -> evals/reports/latest.{jsonl,md}
+uv run python evals/run_eval.py    # latency/cost + automated quality metrics -> evals/reports/latest.{jsonl,md}
+uv run python evals/run_eval.py --offline-fixture   # hermetic smoke run (no keys/network)
+uv run python evals/run_eval.py --fixture-corpus --judge  # add LLM faithfulness/answer-relevance grading
 docker compose up --build          # full stack: API + Qdrant
 ```
 
@@ -49,4 +51,6 @@ The brief request is the core flow and spans several modules:
 - **Legacy, do not build on:** `src/vector_store.py` is a backward-compat alias for old scripts; `scripts/run_arxiv_search.py` and `config/categories.yaml` are leftovers from the prior Streamlit demo. New code uses `src/retrieval/`.
 - Config is env-driven; see `.env.example`. A local `.env` is auto-loaded (python-dotenv in `src/settings.py`), so secrets live there (gitignored), not in the shell. Defaults favor a runnable local setup (in-memory store, deterministic fallback) when services/keys are missing. Embeddings default to `EMBEDDING_MODEL=allenai/specter2_base`, `EMBEDDING_DOCUMENT_ADAPTER=allenai/specter2`, and `EMBEDDING_QUERY_ADAPTER=allenai/specter2_adhoc_query`.
 - Retrieval quality is guarded in the agent layer: `search_papers` embeds descriptive text built from the brief request, tool query, and constraints, and `RETRIEVAL_MIN_SCORE` can drop weak vector matches before they reach the model.
+- arXiv fetches default to relevance ordering (`ARXIV_SORT=relevance`, via `resolve_sort_criterion` in `src/arxiv_client.py`), not newest-first, so the ingested corpus is not biased toward the latest submissions; set `submitted_date`/`last_updated` for recency-focused runs.
+- Brief quality is measured, not just eyeballed: `evals/metrics.py` computes deterministic citation-grounding (hallucinated ids, fraction read in full), evidence-utilization, and uncertainty-signaling scores on every eval run. The optional `--judge` flag adds two LLM graders: whole-brief faithfulness/answer-relevance, and per-citation grounding (`citation_grounding_judge`) that checks each inline `[id]` claim is semantically supported by that specific paper, catching real-but-misused citations the deterministic check cannot. `FullTextDiagnostics.succeeded_ids` records which cited papers were actually read.
 - **Tests are hermetic by contract:** `tests/conftest.py` sets `DISABLE_DOTENV=1` and clears provider keys before `src.settings` imports, so a real key in `.env` never causes the suite to hit a live LLM. `Settings` reads env at class-definition (import) time — overrides must be passed explicitly to `Settings(...)`, not set after import.
