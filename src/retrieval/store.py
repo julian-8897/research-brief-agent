@@ -127,11 +127,16 @@ class QdrantPaperVectorStore(PaperVectorStore):
             ) from exc
 
         self._models = {"Distance": Distance, "VectorParams": VectorParams}
-        self.client = QdrantClient(
-            url=settings.qdrant_url,
-            api_key=settings.qdrant_api_key,
-            prefer_grpc=False,
-        )
+        if settings.qdrant_path:
+            # Embedded local mode: no server, persists on disk in-process.
+            # url/api_key are mutually exclusive with path in qdrant-client.
+            self.client = QdrantClient(path=settings.qdrant_path)
+        else:
+            self.client = QdrantClient(
+                url=settings.qdrant_url,
+                api_key=settings.qdrant_api_key,
+                prefer_grpc=False,
+            )
 
     def ensure_collection(self) -> None:
         collections = self.client.get_collections().collections
