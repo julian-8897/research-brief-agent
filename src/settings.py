@@ -41,6 +41,13 @@ def _csv_env(name: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "research-brief-agent")
@@ -125,6 +132,16 @@ class Settings:
     arxiv_sort: str = os.getenv("ARXIV_SORT", "relevance")
     max_retrieval_results: int = _int_env("MAX_RETRIEVAL_RESULTS", 20)
     retrieval_min_score: float = _float_env("RETRIEVAL_MIN_SCORE", 0.0)
+
+    # Search-time query handling. SPECTER2's query adapter ranks best on
+    # descriptive, abstract-like text, so short keyword queries are expanded via
+    # the LLM (HyDE-style) before embedding. Backfill fetches fresh arXiv papers
+    # for the query so the raw /papers/search endpoint has coverage instead of
+    # only ranking whatever happens to be indexed.
+    query_expansion_enabled: bool = _bool_env("QUERY_EXPANSION_ENABLED", True)
+    query_expansion_max_words: int = _int_env("QUERY_EXPANSION_MAX_WORDS", 12)
+    search_auto_backfill: bool = _bool_env("SEARCH_AUTO_BACKFILL", True)
+    search_backfill_max_papers: int = _int_env("SEARCH_BACKFILL_MAX_PAPERS", 25)
     estimated_input_token_cost_per_1k: float = _float_env(
         "ESTIMATED_INPUT_TOKEN_COST_PER_1K", 0.003
     )

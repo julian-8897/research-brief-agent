@@ -17,6 +17,7 @@ from src.api.sse import format_sse_event
 from src.arxiv_client import ArxivClient
 from src.embeddings import TextEmbedder, build_paper_embedding_text
 from src.ingestion import fetch_arxiv_papers
+from src.llm import build_llm_provider
 from src.models import BriefRequest, IngestRequest, IngestResponse, SearchResponse
 from src.observability import Tracer
 from src.retrieval import InMemoryVectorStore, PaperVectorStore, build_vector_store
@@ -44,6 +45,17 @@ class Services:
             self.vector_store_status = VectorStoreStatus(
                 backend=self.vector_store.backend_name
             )
+        # Built lazily and cached so search-time query expansion reuses one
+        # provider client instead of reconstructing it per request.
+        self._llm_provider = None
+        self._llm_provider_built = False
+
+    @property
+    def llm_provider(self):
+        if not self._llm_provider_built:
+            self._llm_provider = build_llm_provider(self.settings)
+            self._llm_provider_built = True
+        return self._llm_provider
 
     @property
     def tools(self) -> ResearchTools:
@@ -52,6 +64,7 @@ class Services:
             arxiv_client=self.arxiv_client,
             embedder=self.embedder,
             vector_store=self.vector_store,
+            llm=self.llm_provider,
         )
 
     @property
@@ -324,8 +337,18 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
         services: Annotated[Services, Depends(get_services)],
         query: str = Query(..., min_length=3),
         k: int = Query(default=10, ge=1, le=50),
+        expand: bool | None = Query(
+            default=None,
+            description="Override LLM query expansion (default from settings).",
+        ),
+        backfill: bool | None = Query(
+            default=None,
+            description="Override arXiv coverage backfill (default from settings).",
+        ),
     ) -> SearchResponse:
-        return services.tools.semantic_search(query, k)
+        return services.tools.semantic_search(
+            query, k, expand=expand, backfill=backfill
+        )
 
     @service_app.post("/briefs/stream")
     async def stream_brief(

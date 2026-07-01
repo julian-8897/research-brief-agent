@@ -57,6 +57,9 @@ class SearchResponse(BaseModel):
     query: str
     results: list[SearchResponseItem]
     retrieval_latency_ms: float
+    # Search-time coverage/expansion transparency.
+    expanded_query: bool = False
+    backfilled: int = 0
 
 
 class RetrievalDiagnostics(BaseModel):

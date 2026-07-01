@@ -167,6 +167,69 @@ def test_search_endpoint():
     assert response.json()["results"][0]["paper"]["id"] == "2501.00001"
 
 
+class CountingArxivClient(FakeArxivClient):
+    def __init__(self):
+        self.calls = 0
+
+    def search_papers(self, query, max_results, sort_by=None):
+        self.calls += 1
+        return super().search_papers(query, max_results, sort_by=sort_by)
+
+
+def _client_with_counting_arxiv(arxiv_client, *, backfill: bool):
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        search_auto_backfill=backfill,
+        query_expansion_enabled=False,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    store.upsert(
+        [
+            PaperRecord(
+                id="2501.00001",
+                title="Scientific Retrieval",
+                summary="Retrieval for scientific briefs.",
+                arxiv_url="https://arxiv.org/abs/2501.00001",
+            )
+        ],
+        np.array([[1.0, 0.0]]),
+    )
+    app = create_app(
+        Services(
+            settings=settings,
+            arxiv_client=arxiv_client,
+            embedder=FakeEmbedder(),
+            vector_store=store,
+            tracer=Tracer(settings),
+        )
+    )
+    return TestClient(app)
+
+
+def test_search_backfills_arxiv_for_coverage_by_default():
+    arxiv_client = CountingArxivClient()
+    with _client_with_counting_arxiv(arxiv_client, backfill=True) as client:
+        response = client.get("/papers/search", params={"query": "retrieval", "k": 1})
+
+    assert response.status_code == 200
+    assert arxiv_client.calls == 1
+    assert response.json()["backfilled"] == 1
+
+
+def test_search_backfill_can_be_disabled_per_request():
+    arxiv_client = CountingArxivClient()
+    with _client_with_counting_arxiv(arxiv_client, backfill=True) as client:
+        response = client.get(
+            "/papers/search",
+            params={"query": "retrieval", "k": 1, "backfill": "false"},
+        )
+
+    assert response.status_code == 200
+    assert arxiv_client.calls == 0
+    assert response.json()["backfilled"] == 0
+
+
 def test_ingest_endpoint():
     with _client() as client:
         response = client.post("/ingest", json={"query": "cat:cs.IR", "max_papers": 1})

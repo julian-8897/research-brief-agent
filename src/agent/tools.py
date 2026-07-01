@@ -1,9 +1,11 @@
 import time
 from dataclasses import dataclass
 
+from src.agent.query_expansion import expand_query
 from src.arxiv_client import ArxivClient
 from src.embeddings import TextEmbedder, build_paper_embedding_text
 from src.ingestion import fetch_arxiv_papers
+from src.llm import LLMProvider
 from src.models import (
     BriefRequest,
     RetrievalDiagnostics,
@@ -27,11 +29,13 @@ class ResearchTools:
         arxiv_client: ArxivClient,
         embedder: TextEmbedder,
         vector_store: PaperVectorStore,
+        llm: LLMProvider | None = None,
     ):
         self.settings = settings
         self.arxiv_client = arxiv_client
         self.embedder = embedder
         self.vector_store = vector_store
+        self.llm = llm
 
     def arxiv_metadata_search(self, request: BriefRequest):
         domain_part = (
@@ -122,10 +126,51 @@ class ResearchTools:
             )
         return evidence
 
-    def semantic_search(self, query: str, k: int) -> SearchResponse:
-        result = self.vector_retrieve(query, k)
+    def semantic_search(
+        self,
+        query: str,
+        k: int,
+        *,
+        expand: bool | None = None,
+        backfill: bool | None = None,
+    ) -> SearchResponse:
+        """Search the indexed corpus for a raw user query.
+
+        Two coverage-oriented behaviors wrap the bare vector search:
+
+        * expansion — a short keyword query is rewritten (LLM, HyDE-style) into
+          a descriptive sentence before embedding, which SPECTER2 ranks better.
+        * backfill — fresh arXiv papers for the query are fetched and indexed so
+          the endpoint returns relevant literature even when the corpus did not
+          already contain it, instead of ranking only whatever was indexed.
+
+        ``expand``/``backfill`` override the configured defaults when set.
+        """
+        do_expand = (
+            self.settings.query_expansion_enabled if expand is None else expand
+        )
+        do_backfill = (
+            self.settings.search_auto_backfill if backfill is None else backfill
+        )
+
+        embed_text, expanded = expand_query(
+            query,
+            self.llm if do_expand else None,
+            enabled=do_expand,
+            max_words=self.settings.query_expansion_max_words,
+        )
+
+        backfilled = 0
+        if do_backfill:
+            backfilled, _papers = self.fetch_and_ingest(
+                query, self.settings.search_backfill_max_papers
+            )
+
+        result = self.vector_retrieve(query, k, embed_text=embed_text)
         return SearchResponse(
             query=query,
             results=result.items,
             retrieval_latency_ms=result.diagnostics.retrieval_latency_ms,
+            expanded_query=expanded,
+            backfilled=backfilled,
         )
