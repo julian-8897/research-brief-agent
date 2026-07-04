@@ -2,6 +2,13 @@ from threading import Lock
 
 import numpy as np
 
+# Canonical SPECTER2 default identities. Defined here (the module that owns the
+# embedder) and referenced by Settings so the model/adapter names live in one
+# place rather than being restated as literals in both.
+DEFAULT_EMBEDDING_MODEL = "allenai/specter2_base"
+DEFAULT_DOCUMENT_ADAPTER = "allenai/specter2"
+DEFAULT_QUERY_ADAPTER = "allenai/specter2_adhoc_query"
+
 
 def build_paper_embedding_text(paper: dict) -> str:
     """Build the SPECTER-style title/abstract input used for paper indexing."""
@@ -15,10 +22,10 @@ class TextEmbedder:
 
     def __init__(
         self,
-        model_name: str = "allenai/specter2_base",
+        model_name: str = DEFAULT_EMBEDDING_MODEL,
         *,
-        document_adapter: str = "allenai/specter2",
-        query_adapter: str = "allenai/specter2_adhoc_query",
+        document_adapter: str = DEFAULT_DOCUMENT_ADAPTER,
+        query_adapter: str = DEFAULT_QUERY_ADAPTER,
         document_adapter_name: str = "proximity",
         query_adapter_name: str = "adhoc_query",
     ):
@@ -49,9 +56,7 @@ class TextEmbedder:
                 )
                 self._model.eval()
 
-    def encode_documents(
-        self, texts: list[str], batch_size: int = 32
-    ) -> np.ndarray:
+    def encode_documents(self, texts: list[str], batch_size: int = 32) -> np.ndarray:
         """Encode paper title/abstract texts with the SPECTER2 proximity adapter."""
         return self._encode(
             texts, batch_size=batch_size, adapter_name=self.document_adapter_name

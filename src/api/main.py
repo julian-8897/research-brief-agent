@@ -1,5 +1,7 @@
+import logging
 import secrets
 import time
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,9 +21,11 @@ from src.embeddings import TextEmbedder, build_paper_embedding_text
 from src.ingestion import fetch_arxiv_papers
 from src.llm import build_llm_provider
 from src.models import BriefRequest, IngestRequest, IngestResponse, SearchResponse
-from src.observability import Tracer
+from src.observability import RunRecordStore, Tracer, configure_logging, log_event
 from src.retrieval import InMemoryVectorStore, PaperVectorStore, build_vector_store
 from src.settings import Settings, get_settings
+
+logger = logging.getLogger("research_brief.api")
 
 
 @dataclass(frozen=True)
@@ -38,9 +42,15 @@ class Services:
     embedder: TextEmbedder
     vector_store: PaperVectorStore
     tracer: Tracer
+    run_records: RunRecordStore | None = None
     vector_store_status: VectorStoreStatus | None = None
 
     def __post_init__(self) -> None:
+        if self.run_records is None:
+            self.run_records = RunRecordStore(
+                self.settings.run_records_dir,
+                required=self.settings.run_records_required,
+            )
         if self.vector_store_status is None:
             self.vector_store_status = VectorStoreStatus(
                 backend=self.vector_store.backend_name
@@ -73,6 +83,7 @@ class Services:
             settings=self.settings,
             tools=self.tools,
             tracer=self.tracer,
+            llm=self.llm_provider,
         )
 
 
@@ -136,6 +147,10 @@ def create_services(settings: Settings) -> Services:
         ),
         vector_store=vector_store,
         tracer=Tracer(settings),
+        run_records=RunRecordStore(
+            settings.run_records_dir,
+            required=settings.run_records_required,
+        ),
         vector_store_status=vector_store_status,
     )
 
@@ -178,10 +193,68 @@ def _llm_key_present(settings: Settings) -> bool:
     return False
 
 
+def _final_summary(event: dict) -> dict[str, object]:
+    data = event.get("data")
+    if not isinstance(data, dict):
+        return {}
+    usage = data.get("token_cost_estimate") or {}
+    retrieval = data.get("retrieval_diagnostics") or {}
+    full_text = data.get("full_text_diagnostics") or {}
+    return {
+        "brief_latency_ms": data.get("latency_ms"),
+        "warnings": data.get("warnings", []),
+        "cited_papers": len(data.get("cited_papers", [])),
+        "retrieved": retrieval.get("returned"),
+        "full_text_attempted": full_text.get("attempted"),
+        "full_text_succeeded": full_text.get("succeeded"),
+        "llm_call_count": usage.get("llm_call_count"),
+        "tool_call_count": usage.get("tool_call_count"),
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "estimated_cost_usd": usage.get("estimated_cost_usd"),
+        "langfuse_trace_url": data.get("langfuse_trace_url"),
+    }
+
+
+def _log_brief_event(
+    event: dict,
+    *,
+    request_id: str,
+    run_id: str,
+    provider: str,
+    model: str | None,
+) -> None:
+    event_type = str(event.get("event"))
+    payload = {
+        "request_id": request_id,
+        "run_id": run_id,
+        "provider": provider,
+        "model": model,
+        "agent_event": event_type,
+    }
+    for key in (
+        "turn",
+        "name",
+        "code",
+        "reason",
+        "stage",
+        "returned",
+        "latency_ms",
+        "llm_calls",
+        "full_text_fetched",
+    ):
+        if key in event:
+            payload[key] = event[key]
+    if event_type == "final":
+        payload.update(_final_summary(event))
+    log_event(logger, "brief_event", **payload)
+
+
 def create_app(initial_services: Services | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(service_app: FastAPI):
         services = initial_services or create_services(get_settings())
+        configure_logging(services.settings)
         service_app.state.services = services
         service_app.state.rate_limiter = InProcessRateLimiter(
             services.settings.rate_limit_requests,
@@ -192,7 +265,10 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
     service_app = FastAPI(
         title="Research Brief Agent",
         version="0.1.0",
-        description="LLM-powered cited research briefs over persistent arXiv retrieval.",
+        description=(
+            "LLM-powered cited research briefs for AI/ML and scientific-ML "
+            "engineering decisions, backed by persistent arXiv retrieval."
+        ),
         lifespan=lifespan,
     )
 
@@ -202,12 +278,34 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
 
     @service_app.middleware("http")
     async def protect_public_endpoints(request: Request, call_next):
+        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+        request.state.request_id = request_id
+        started = time.perf_counter()
         if request.url.path == "/health":
-            return await call_next(request)
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            log_event(
+                logger,
+                "http_request",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                latency_ms=(time.perf_counter() - started) * 1000,
+            )
+            return response
 
         services = get_services(request)
         settings = services.settings
         if not _authorized(request, settings):
+            log_event(
+                logger,
+                "http_request_unauthorized",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status_code=401,
+            )
             return JSONResponse(
                 status_code=401,
                 content={
@@ -215,18 +313,41 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
                         f"Missing or invalid {settings.api_key_header_name} header."
                     )
                 },
+                headers={"X-Request-ID": request_id},
             )
 
         limiter: InProcessRateLimiter = request.app.state.rate_limiter
         allowed, _remaining = limiter.allow(_request_ip(request))
         if not allowed:
+            log_event(
+                logger,
+                "http_request_rate_limited",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status_code=429,
+            )
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded. Try again later."},
-                headers={"Retry-After": str(settings.rate_limit_window_seconds)},
+                headers={
+                    "Retry-After": str(settings.rate_limit_window_seconds),
+                    "X-Request-ID": request_id,
+                },
             )
 
-        return await call_next(request)
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        log_event(
+            logger,
+            "http_request",
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            latency_ms=(time.perf_counter() - started) * 1000,
+        )
+        return response
 
     @service_app.get("/")
     def index() -> FileResponse:
@@ -352,13 +473,115 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
 
     @service_app.post("/briefs/stream")
     async def stream_brief(
-        request: BriefRequest, services: Annotated[Services, Depends(get_services)]
+        request: BriefRequest,
+        raw_request: Request,
+        services: Annotated[Services, Depends(get_services)],
     ) -> StreamingResponse:
-        async def _events():
-            async for event in services.agent.stream(request):
-                yield format_sse_event(event)
+        run_id = uuid.uuid4().hex
+        request_id = getattr(raw_request.state, "request_id", run_id)
+        provider = services.llm_provider
+        provider_name = (
+            provider.name if provider is not None else services.settings.llm_provider
+        )
+        provider_model = provider.model if provider is not None else None
+        started = time.perf_counter()
+        services.run_records.start(
+            run_id,
+            {
+                "request_id": request_id,
+                "request": request.model_dump(mode="json"),
+                "provider": provider_name,
+                "model": provider_model,
+                "vector_store": services.vector_store.backend_name,
+                "environment": services.settings.environment,
+            },
+        )
+        log_event(
+            logger,
+            "brief_run_started",
+            request_id=request_id,
+            run_id=run_id,
+            provider=provider_name,
+            model=provider_model,
+            vector_store=services.vector_store.backend_name,
+        )
 
-        return StreamingResponse(_events(), media_type="text/event-stream")
+        async def _events():
+            status = "ended_without_final"
+            final_summary: dict[str, object] = {}
+            try:
+                async for event in services.agent.stream(request):
+                    enriched = {
+                        **event,
+                        "run_id": run_id,
+                        "request_id": request_id,
+                    }
+                    services.run_records.event(
+                        run_id,
+                        {
+                            "request_id": request_id,
+                            "event": enriched,
+                        },
+                    )
+                    _log_brief_event(
+                        enriched,
+                        request_id=request_id,
+                        run_id=run_id,
+                        provider=provider_name,
+                        model=provider_model,
+                    )
+                    if enriched.get("event") == "final":
+                        status = "completed"
+                        final_summary = _final_summary(enriched)
+                    yield format_sse_event(enriched)
+            except Exception as exc:
+                status = "error"
+                services.run_records.event(
+                    run_id,
+                    {
+                        "request_id": request_id,
+                        "event": {
+                            "event": "stream_exception",
+                            "message": str(exc),
+                            "type": type(exc).__name__,
+                        },
+                    },
+                )
+                log_event(
+                    logger,
+                    "brief_run_error",
+                    request_id=request_id,
+                    run_id=run_id,
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
+                raise
+            finally:
+                latency_ms = (time.perf_counter() - started) * 1000
+                services.run_records.finish(
+                    run_id,
+                    {
+                        "request_id": request_id,
+                        "status": status,
+                        "latency_ms": latency_ms,
+                        **final_summary,
+                    },
+                )
+                log_event(
+                    logger,
+                    "brief_run_finished",
+                    request_id=request_id,
+                    run_id=run_id,
+                    status=status,
+                    latency_ms=latency_ms,
+                    **final_summary,
+                )
+
+        return StreamingResponse(
+            _events(),
+            media_type="text/event-stream",
+            headers={"X-Run-ID": run_id, "X-Request-ID": request_id},
+        )
 
     return service_app
 

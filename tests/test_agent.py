@@ -108,7 +108,7 @@ def test_agent_fallback_returns_cited_brief():
 def test_agent_runs_tool_loop_and_reports_measured_usage(monkeypatch):
     monkeypatch.setattr(
         "src.agent.toolset.fetch_arxiv_fulltext",
-        lambda pdf_url, *, timeout, char_budget: ("FULL BODY TEXT", False),
+        lambda pdf_url, *, timeout, char_budget, **kwargs: ("FULL BODY TEXT", False),
     )
     settings = Settings(
         vector_store_backend="memory",
@@ -261,7 +261,7 @@ def test_forced_final_discards_tool_markup_and_uses_fallback():
 def test_discovery_tools_withdrawn_after_search_budget(monkeypatch):
     monkeypatch.setattr(
         "src.agent.toolset.fetch_arxiv_fulltext",
-        lambda pdf_url, *, timeout, char_budget: ("FULL BODY TEXT", False),
+        lambda pdf_url, *, timeout, char_budget, **kwargs: ("FULL BODY TEXT", False),
     )
     settings = Settings(
         vector_store_backend="memory",
@@ -330,7 +330,7 @@ def test_discovery_tools_withdrawn_after_search_budget(monkeypatch):
 def test_agent_blocks_final_until_full_text_read(monkeypatch):
     monkeypatch.setattr(
         "src.agent.toolset.fetch_arxiv_fulltext",
-        lambda pdf_url, *, timeout, char_budget: ("FULL BODY TEXT", False),
+        lambda pdf_url, *, timeout, char_budget, **kwargs: ("FULL BODY TEXT", False),
     )
     settings = Settings(
         vector_store_backend="memory",
@@ -426,7 +426,7 @@ def test_agent_compacts_older_full_text_tool_results(monkeypatch):
     body = "FULL BODY TEXT " * 500
     monkeypatch.setattr(
         "src.agent.toolset.fetch_arxiv_fulltext",
-        lambda pdf_url, *, timeout, char_budget: (body, False),
+        lambda pdf_url, *, timeout, char_budget, **kwargs: (body, False),
     )
     settings = Settings(
         vector_store_backend="memory",

@@ -53,6 +53,10 @@ class PaperVectorStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        raise NotImplementedError
+
+    @abstractmethod
     def count(self) -> int:
         raise NotImplementedError
 
@@ -107,6 +111,10 @@ class InMemoryVectorStore(PaperVectorStore):
             for idx in top_indices
             if math.isfinite(float(scores[idx]))
         ]
+
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        candidates = set(ids)
+        return {paper.id for paper in self._papers if paper.id in candidates}
 
     def count(self) -> int:
         return len(self._papers)
@@ -198,6 +206,26 @@ class QdrantPaperVectorStore(PaperVectorStore):
             for hit in hits
             if hit.payload
         ]
+
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        self.ensure_collection()
+        requested = {paper_id for paper_id in ids if paper_id}
+        if not requested:
+            return set()
+        point_ids = [_point_id(paper_id) for paper_id in requested]
+        points = self.client.retrieve(
+            collection_name=self.settings.qdrant_collection,
+            ids=point_ids,
+            with_payload=True,
+            with_vectors=False,
+        )
+        existing: set[str] = set()
+        for point in points:
+            payload = getattr(point, "payload", None) or {}
+            paper_id = payload.get("id")
+            if paper_id in requested:
+                existing.add(paper_id)
+        return existing
 
     def count(self) -> int:
         self.ensure_collection()

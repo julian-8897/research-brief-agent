@@ -28,7 +28,7 @@ class FakeArxivClient:
             {
                 "id": "2501.00001",
                 "title": "Scientific Retrieval",
-                "summary": "Retrieval for scientific briefs.",
+                "summary": "Retrieval for technical briefs.",
                 "authors": ["A. Researcher"],
                 "categories": ["cs.IR"],
                 "primary_category": "cs.IR",
@@ -70,7 +70,7 @@ def _client():
             PaperRecord(
                 id="2501.00001",
                 title="Scientific Retrieval",
-                summary="Retrieval for scientific briefs.",
+                summary="Retrieval for technical briefs.",
                 arxiv_url="https://arxiv.org/abs/2501.00001",
             )
         ],
@@ -96,7 +96,7 @@ def _client_with_settings(settings):
             PaperRecord(
                 id="2501.00001",
                 title="Scientific Retrieval",
-                summary="Retrieval for scientific briefs.",
+                summary="Retrieval for technical briefs.",
                 arxiv_url="https://arxiv.org/abs/2501.00001",
             )
         ],
@@ -189,7 +189,7 @@ def _client_with_counting_arxiv(arxiv_client, *, backfill: bool):
             PaperRecord(
                 id="2501.00001",
                 title="Scientific Retrieval",
-                summary="Retrieval for scientific briefs.",
+                summary="Retrieval for technical briefs.",
                 arxiv_url="https://arxiv.org/abs/2501.00001",
             )
         ],
@@ -207,14 +207,37 @@ def _client_with_counting_arxiv(arxiv_client, *, backfill: bool):
     return TestClient(app)
 
 
-def test_search_backfills_arxiv_for_coverage_by_default():
+def test_search_backfills_arxiv_when_enabled_by_settings():
     arxiv_client = CountingArxivClient()
     with _client_with_counting_arxiv(arxiv_client, backfill=True) as client:
         response = client.get("/papers/search", params={"query": "retrieval", "k": 1})
 
     assert response.status_code == 200
     assert arxiv_client.calls == 1
-    assert response.json()["backfilled"] == 1
+    assert response.json()["backfilled"] == 0
+
+
+def test_search_does_not_backfill_by_default():
+    arxiv_client = CountingArxivClient()
+    with _client_with_counting_arxiv(arxiv_client, backfill=False) as client:
+        response = client.get("/papers/search", params={"query": "retrieval", "k": 1})
+
+    assert response.status_code == 200
+    assert arxiv_client.calls == 0
+    assert response.json()["backfilled"] == 0
+
+
+def test_search_backfill_can_be_enabled_per_request():
+    arxiv_client = CountingArxivClient()
+    with _client_with_counting_arxiv(arxiv_client, backfill=False) as client:
+        response = client.get(
+            "/papers/search",
+            params={"query": "retrieval", "k": 1, "backfill": "true"},
+        )
+
+    assert response.status_code == 200
+    assert arxiv_client.calls == 1
+    assert response.json()["backfilled"] == 0
 
 
 def test_search_backfill_can_be_disabled_per_request():
@@ -260,7 +283,7 @@ def test_stream_brief_endpoint_returns_final_event():
         response = client.post(
             "/briefs/stream",
             json={
-                "research_question": "How should retrieval support scientific briefs?",
+                "research_question": "How should retrieval support technical briefs?",
                 "max_papers": 1,
             },
         )
@@ -268,6 +291,43 @@ def test_stream_brief_endpoint_returns_final_event():
     assert response.status_code == 200
     assert "data:" in response.text
     assert '"event": "final"' in response.text
+
+
+def test_stream_brief_persists_run_record(tmp_path):
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        run_records_dir=str(tmp_path),
+    )
+    with _client_with_settings(settings) as client:
+        response = client.post(
+            "/briefs/stream",
+            headers={"X-Request-ID": "req-test"},
+            json={
+                "research_question": "How should retrieval support technical briefs?",
+                "max_papers": 1,
+            },
+        )
+
+    assert response.status_code == 200
+    run_id = response.headers["X-Run-ID"]
+    assert response.headers["X-Request-ID"] == "req-test"
+    events = _parse_sse_events(response.text)
+    assert {event["run_id"] for event in events} == {run_id}
+    assert {event["request_id"] for event in events} == {"req-test"}
+
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / f"{run_id}.jsonl").read_text().splitlines()
+    ]
+    assert rows[0]["type"] == "run_started"
+    assert rows[0]["request_id"] == "req-test"
+    assert any(
+        row["type"] == "event" and row["event"]["event"] == "final" for row in rows
+    )
+    assert rows[-1]["type"] == "run_finished"
+    assert rows[-1]["status"] == "completed"
+    assert (tmp_path / "runs.jsonl").exists()
 
 
 def test_sse_event_contract_accepts_stable_event_shapes():
@@ -335,7 +395,7 @@ def test_stream_brief_endpoint_events_match_sse_contract():
         response = client.post(
             "/briefs/stream",
             json={
-                "research_question": "How should retrieval support scientific briefs?",
+                "research_question": "How should retrieval support technical briefs?",
                 "max_papers": 1,
             },
         )

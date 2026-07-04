@@ -13,9 +13,7 @@ def test_build_paper_embedding_text_uses_title_and_abstract():
 
 
 class FakeTokenizer:
-    def __call__(
-        self, texts, *, truncation, max_length, padding, return_tensors
-    ):
+    def __call__(self, texts, *, truncation, max_length, padding, return_tensors):
         assert truncation is True
         assert max_length == 512
         assert padding is True

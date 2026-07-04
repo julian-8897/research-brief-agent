@@ -1,18 +1,19 @@
 """Fetch and extract the full body text of an arXiv paper from its PDF.
 
-Deployable and self-contained: downloads the PDF over HTTP and extracts text
-with pypdf, so it runs inside the service (no external MCP or hosted API).
-Page count and character budget are bounded to keep latency and tokens in check.
+Deployable by default: downloads the PDF over HTTP and extracts text with the
+configured local extractor. ``pypdf`` is the lightweight fallback; Docling can be
+enabled as an optional layout-aware backend.
 """
 
 from __future__ import annotations
 
-import io
 from dataclasses import dataclass
 
-# Hard cap on pages parsed, independent of the character budget, so a huge or
-# malformed PDF cannot blow up parse time.
-_MAX_PAGES = 30
+from src.ingestion.pdf_extractors import (
+    PdfExtractionError,
+    PdfExtractorName,
+    extract_pdf,
+)
 
 
 @dataclass
@@ -29,7 +30,11 @@ class FullTextFetchError(RuntimeError):
 
 
 def fetch_arxiv_fulltext(
-    pdf_url: str, *, timeout: float = 20.0, char_budget: int = 12000
+    pdf_url: str,
+    *,
+    timeout: float = 20.0,
+    char_budget: int = 12000,
+    extractor: PdfExtractorName = "auto",
 ) -> tuple[str, bool]:
     """Return ``(text, truncated)`` for a paper PDF, capped at ``char_budget``."""
     if not pdf_url:
@@ -40,16 +45,14 @@ def fetch_arxiv_fulltext(
         raise ValueError("char_budget must be positive")
 
     data = _download(pdf_url, timeout)
-    text = _extract_text(data, char_budget)
-    truncated = len(text) > char_budget
-    text = text[:char_budget].strip()
-    if not text:
+    result = _extract_text(data, char_budget, extractor=extractor)
+    if not result.text:
         raise FullTextFetchError(
             "empty_text",
             f"PDF text extraction returned no text for {pdf_url}",
             url=pdf_url,
         )
-    return text, truncated
+    return result.text, result.truncated
 
 
 def _download(url: str, timeout: float) -> bytes:
@@ -81,22 +84,16 @@ def _download(url: str, timeout: float) -> bytes:
     return response.content
 
 
-def _extract_text(data: bytes, char_budget: int) -> str:
-    from pypdf import PdfReader
-
+def _extract_text(data: bytes, char_budget: int, *, extractor: PdfExtractorName = "auto"):
     try:
-        reader = PdfReader(io.BytesIO(data))
-        parts: list[str] = []
-        total = 0
-        for page in reader.pages[:_MAX_PAGES]:
-            chunk = page.extract_text() or ""
-            parts.append(chunk)
-            total += len(chunk)
-            if total > char_budget:
-                break
-        return "\n".join(parts)
-    except Exception as exc:
+        return extract_pdf(data, char_budget=char_budget, extractor=extractor)
+    except PdfExtractionError as exc:
+        code = (
+            "extractor_unavailable"
+            if exc.code == "extractor_unavailable"
+            else "parse_error"
+        )
         raise FullTextFetchError(
-            "parse_error",
-            f"Could not parse PDF text: {exc}",
+            code,
+            exc.message,
         ) from exc

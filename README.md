@@ -1,10 +1,10 @@
 # Research Brief Agent
 
-A research brief service over arXiv. A user submits a research question; the service retrieves relevant papers, reads the full text of promising candidates when available, and streams back a cited decision memo covering methods, baselines, risks, uncertainty, next steps, latency, and estimated cost. The output is the memo, not a chat answer or a ranked list of papers.
+A source-grounded briefing service for AI/ML and scientific-ML engineers and researchers making evidence-backed engineering decisions: method selection, architecture tradeoffs, technique adoption, and deployment/uncertainty risk. A user submits a research decision question; the service retrieves relevant papers, reads the full text of promising arXiv candidates when available, and streams back a cited memo covering recommendation, evidence, tradeoffs, risks, uncertainty, next steps, latency, and measured cost. The output is the memo, not a chat answer or a ranked list of links.
 
-Retrieval runs over a persistent vector store (Qdrant with SPECTER embeddings), and the agent backfills from arXiv when the corpus is thin. Full-text PDFs are read in-process, and the agent blocks the final memo until that evidence has been read, or records a degraded run if it cannot. Each run reports latency, token usage, and cost taken from the provider response, and every turn and tool call is traced to Langfuse.
+The evidence backend is scholarly literature: persistent Qdrant retrieval with SPECTER embeddings, plus on-demand arXiv backfill when the corpus is thin. Full-text PDFs are read in-process, and the agent blocks the final memo until that evidence has been read, or records a degraded run if it cannot. Each run reports latency, token usage, and cost taken from the provider response, every turn and tool call is traced to Langfuse, and the streaming API writes JSONL run records plus structured request/run logs.
 
-Synthesis runs against Anthropic (native Claude) or any OpenAI Chat Completions-compatible endpoint (OpenAI, local models, OpenRouter, codex/opencode-style gateways). The agent loop hands the model a catalogue of research tools (semantic search, arXiv backfill, abstract-level detail, full-text reading) and lets it choose which to call and in what order; turn, discovery, and tool-call budgets (`AGENT_MAX_ITERATIONS`, `AGENT_MAX_SEARCH_CALLS`, `AGENT_MAX_TOOL_CALLS`) bound latency and cost. The same tool-use layer drives both backends.
+Synthesis runs against Anthropic (native Claude) or any OpenAI Chat Completions-compatible endpoint (OpenAI, local models, OpenRouter, codex/opencode-style gateways). The agent loop hands the model a catalogue of evidence tools (semantic search, arXiv backfill, abstract-level detail, full-text reading) and lets it choose which to call and in what order; turn, discovery, and tool-call budgets (`AGENT_MAX_ITERATIONS`, `AGENT_MAX_SEARCH_CALLS`, `AGENT_MAX_TOOL_CALLS`) bound latency and cost. The same tool-use layer drives both backends.
 
 ## Architecture
 
@@ -22,7 +22,7 @@ flowchart LR
     Agent --> Langfuse[Langfuse traces]
 ```
 
-The agent exposes four tools to the model: `search_papers` (semantic retrieval over the Qdrant corpus), `fetch_arxiv` (pull fresh metadata from arXiv and index it when the corpus is thin), `get_paper_details` (abstract-level evidence for specific papers), and `get_full_text` (download a paper PDF and read its body — methods and results, not just the abstract). The model composes these, then writes the cited memo as its final turn. Full-text fetching runs in-process (pypdf), so it stays deployable with no external paper service.
+The agent exposes four tools to the model: `search_papers` (semantic retrieval over the Qdrant corpus), `fetch_arxiv` (pull fresh metadata from arXiv and index it when the corpus is thin), `get_paper_details` (abstract-level evidence for specific papers), and `get_full_text` (download a paper PDF and read its body: methods and results, not just the abstract). The model composes these, then writes the cited decision brief as its final turn. Full-text fetching runs in-process (pypdf), so it stays deployable with no external paper service.
 
 To keep multi-turn runs from repeatedly paying for the same large evidence payloads, the agent compacts older tool results before each provider call. The newest tool result is kept raw for one turn, then older search/detail/full-text payloads are replaced with IDs, titles, errors, and bounded excerpts while preserving the provider-required tool-call/tool-result transcript shape.
 
@@ -37,9 +37,9 @@ A brief request looks like:
 
 ```json
 {
-  "research_question": "What methods are promising for retrieval-augmented scientific literature review systems?",
-  "domain": "applied machine learning",
-  "constraints": ["Prefer measurable citation grounding", "Track latency and cost"],
+  "research_question": "Should an AI team use agentic RAG for technical decision briefs, and what tradeoffs matter?",
+  "domain": "applied machine learning / AI product",
+  "constraints": ["Prefer measurable citation grounding", "Track latency, cost, and operational risk"],
   "max_papers": 8,
   "brief_type": "decision_memo"
 }
@@ -73,8 +73,8 @@ uv sync --dev
 uv run uvicorn src.api.main:app --reload
 ```
 
-Open `http://localhost:8000`. The console is ask-first: type a research question
-and run the agent, which retrieves and reads papers itself. If Qdrant is not
+Open `http://localhost:8000`. The console is ask-first: type a technical decision
+question and run the agent, which retrieves and reads evidence itself. If Qdrant is not
 already running at `QDRANT_URL`, local mode falls back to the in-memory store and
 `/health` reports `ready=false` with `vector_store.fallback=true`. The first
 search/brief call may download the SPECTER embedding model unless it is already
@@ -100,7 +100,7 @@ curl -X POST http://localhost:8000/ingest \
 
 curl -N -X POST http://localhost:8000/briefs/stream \
   -H 'content-type: application/json' \
-  -d '{"research_question":"How should uncertainty be handled in scientific ML decision support?","domain":"cs.LG","max_papers":6}'
+  -d '{"research_question":"How should teams communicate uncertainty when neural models support technical decisions?","domain":"cs.LG","max_papers":6}'
 ```
 
 Set credentials for the configured synthesis backend (`ANTHROPIC_API_KEY` for the default `anthropic` provider, or `OPENAI_API_KEY` for the `openai` provider). Without a key, the service returns a deterministic fallback memo, which keeps local tests and CI runnable.
@@ -122,8 +122,11 @@ Environment variables are documented in [.env.example](.env.example). Key settin
 - `AGENT_MAX_ITERATIONS`, `AGENT_MAX_SEARCH_CALLS`, `AGENT_MAX_TOOL_CALLS` (agent loop budgets)
 - `TRANSCRIPT_KEEP_RECENT_TOOL_RESULTS`, `TRANSCRIPT_FULL_TEXT_EXCERPT_CHARS`, `TRANSCRIPT_ABSTRACT_EXCERPT_CHARS` (prompt-token compaction)
 - `FULL_TEXT_CHAR_BUDGET`, `FULL_TEXT_MAX_PAPERS`, `FULL_TEXT_TOTAL_PAPER_BUDGET`, `FULL_TEXT_TIMEOUT_S` (full-text tool limits)
+- `PDF_EXTRACTOR=auto|pypdf|docling` (`auto` uses Docling when installed, then falls back to pypdf)
 - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`
+- `LOG_LEVEL`, `STRUCTURED_LOGS`, `RUN_RECORDS_DIR`, `RUN_RECORDS_REQUIRED`
 - `DEFAULT_MAX_PAPERS`, `MAX_INGEST_RESULTS`, `MAX_RETRIEVAL_RESULTS`, `RETRIEVAL_MIN_SCORE`
+- `QUERY_EXPANSION_ENABLED`, `SEARCH_AUTO_BACKFILL=false`, `SEARCH_BACKFILL_QUERY_EXPANSION`, `RERANK_ENABLED=false`, `RERANK_MODEL`, `RERANK_CANDIDATE_K`
 
 ## Fly Deployment
 
@@ -146,7 +149,7 @@ curl https://research-brief-agent.fly.dev/health
 curl -N -X POST https://research-brief-agent.fly.dev/briefs/stream \
   -H "content-type: application/json" \
   -H "X-API-Key: $DEMO_API_KEY" \
-  -d '{"research_question":"What methods help retrieval-grounded literature review?","max_papers":3}'
+  -d '{"research_question":"What methods help source-grounded technical decision briefs?","max_papers":3}'
 ```
 
 For an OpenAI-compatible backend, set `LLM_PROVIDER=openai`, `OPENAI_API_KEY`, and optionally `OPENAI_BASE_URL` with `fly secrets set`.
@@ -207,7 +210,7 @@ Current verification:
 ```text
 src/
   api/             FastAPI app and streaming routes
-  agent/           Tool-using agent loop, research tools, and toolset adapter
+  agent/           Tool-using agent loop, evidence tools, and toolset adapter
   llm/             Pluggable tool-using backends (Anthropic, OpenAI-compatible)
   ingestion/       arXiv query/date normalization and paper fetching
   retrieval/       Qdrant and in-memory vector stores
@@ -215,7 +218,7 @@ src/
   arxiv_client.py  arXiv metadata client
   embeddings.py    SPECTER embedding helper
 evals/
-  benchmarks/      Curated research questions
+  benchmarks/      Curated AI/ML & scientific-ML decision questions
   run_eval.py      Latency/cost evaluation runner
 static/
   index.html       Single-page web console: ask a question, watch the streaming

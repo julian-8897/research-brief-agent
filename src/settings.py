@@ -2,6 +2,12 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
+from src.embeddings import (
+    DEFAULT_DOCUMENT_ADAPTER,
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_QUERY_ADAPTER,
+)
+
 # Load a local .env so secrets/config live in a gitignored file rather than the
 # shell. Tests set DISABLE_DOTENV=1 (in tests/conftest.py) to stay hermetic and
 # never pick up real provider credentials. Existing env vars always win.
@@ -48,6 +54,14 @@ def _bool_env(name: str, default: bool) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _optional_env(name: str, default: str | None = None) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    value = value.strip()
+    return value or None
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "research-brief-agent")
@@ -92,6 +106,7 @@ class Settings:
     full_text_max_papers: int = _int_env("FULL_TEXT_MAX_PAPERS", 3)
     full_text_total_paper_budget: int = _int_env("FULL_TEXT_TOTAL_PAPER_BUDGET", 3)
     full_text_timeout_s: float = _float_env("FULL_TEXT_TIMEOUT_S", 20.0)
+    pdf_extractor: str = os.getenv("PDF_EXTRACTOR", "auto")
 
     anthropic_api_key: str | None = os.getenv("ANTHROPIC_API_KEY")
     anthropic_model: str = os.getenv(
@@ -102,12 +117,12 @@ class Settings:
     openai_model: str = os.getenv("OPENAI_MODEL", "deepseek-v4-flash")
     openai_base_url: str | None = os.getenv("OPENAI_BASE_URL")
 
-    embedding_model: str = os.getenv("EMBEDDING_MODEL", "allenai/specter2_base")
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
     embedding_query_adapter: str = os.getenv(
-        "EMBEDDING_QUERY_ADAPTER", "allenai/specter2_adhoc_query"
+        "EMBEDDING_QUERY_ADAPTER", DEFAULT_QUERY_ADAPTER
     )
     embedding_document_adapter: str = os.getenv(
-        "EMBEDDING_DOCUMENT_ADAPTER", "allenai/specter2"
+        "EMBEDDING_DOCUMENT_ADAPTER", DEFAULT_DOCUMENT_ADAPTER
     )
     embedding_batch_size: int = _int_env("EMBEDDING_BATCH_SIZE", 16)
     embedding_dimension: int = _int_env("EMBEDDING_DIMENSION", 768)
@@ -123,6 +138,13 @@ class Settings:
     langfuse_public_key: str | None = os.getenv("LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: str | None = os.getenv("LANGFUSE_SECRET_KEY")
     langfuse_host: str | None = os.getenv("LANGFUSE_HOST")
+    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    structured_logs: bool = _bool_env("STRUCTURED_LOGS", True)
+    run_records_dir: str | None = _optional_env("RUN_RECORDS_DIR", ".local/run-records")
+    # When true, run-record persistence is treated as critical: the directory
+    # is probed at startup and write failures propagate. Default is best-effort
+    # so observability IO faults never break the agent stream.
+    run_records_required: bool = _bool_env("RUN_RECORDS_REQUIRED", False)
 
     default_max_papers: int = _int_env("DEFAULT_MAX_PAPERS", 12)
     max_ingest_results: int = _int_env("MAX_INGEST_RESULTS", 200)
@@ -135,13 +157,20 @@ class Settings:
 
     # Search-time query handling. SPECTER2's query adapter ranks best on
     # descriptive, abstract-like text, so short keyword queries are expanded via
-    # the LLM (HyDE-style) before embedding. Backfill fetches fresh arXiv papers
-    # for the query so the raw /papers/search endpoint has coverage instead of
-    # only ranking whatever happens to be indexed.
+    # the LLM (HyDE-style) before embedding. Optional backfill fetches fresh
+    # arXiv papers for the query when explicitly enabled for slower coverage.
     query_expansion_enabled: bool = _bool_env("QUERY_EXPANSION_ENABLED", True)
     query_expansion_max_words: int = _int_env("QUERY_EXPANSION_MAX_WORDS", 12)
-    search_auto_backfill: bool = _bool_env("SEARCH_AUTO_BACKFILL", True)
+    search_auto_backfill: bool = _bool_env("SEARCH_AUTO_BACKFILL", False)
     search_backfill_max_papers: int = _int_env("SEARCH_BACKFILL_MAX_PAPERS", 25)
+    search_backfill_query_expansion: bool = _bool_env(
+        "SEARCH_BACKFILL_QUERY_EXPANSION", True
+    )
+    rerank_enabled: bool = _bool_env("RERANK_ENABLED", False)
+    rerank_model: str = os.getenv(
+        "RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    )
+    rerank_candidate_k: int = _int_env("RERANK_CANDIDATE_K", 40)
     estimated_input_token_cost_per_1k: float = _float_env(
         "ESTIMATED_INPUT_TOKEN_COST_PER_1K", 0.003
     )

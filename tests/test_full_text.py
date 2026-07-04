@@ -6,6 +6,7 @@ import pytest
 from src.agent import ResearchTools
 from src.agent.toolset import ResearchToolset
 from src.ingestion import full_text
+from src.ingestion.pdf_extractors import PdfExtractionResult
 from src.llm import ToolCall
 from src.models import BriefRequest, PaperRecord
 from src.settings import Settings
@@ -21,7 +22,15 @@ class FakeEmbedder:
 
 def test_fetch_arxiv_fulltext_truncates(monkeypatch):
     monkeypatch.setattr(full_text, "_download", lambda url, timeout: b"pdf-bytes")
-    monkeypatch.setattr(full_text, "_extract_text", lambda data, budget: "A" * 5000)
+    monkeypatch.setattr(
+        full_text,
+        "_extract_text",
+        lambda data, budget, **kwargs: PdfExtractionResult(
+            text="A" * 1000,
+            truncated=True,
+            extractor="test",
+        ),
+    )
 
     text, truncated = full_text.fetch_arxiv_fulltext("http://x/pdf", char_budget=1000)
 
@@ -31,7 +40,15 @@ def test_fetch_arxiv_fulltext_truncates(monkeypatch):
 
 def test_fetch_arxiv_fulltext_classifies_empty_extraction(monkeypatch):
     monkeypatch.setattr(full_text, "_download", lambda url, timeout: b"pdf-bytes")
-    monkeypatch.setattr(full_text, "_extract_text", lambda data, budget: "   ")
+    monkeypatch.setattr(
+        full_text,
+        "_extract_text",
+        lambda data, budget, **kwargs: PdfExtractionResult(
+            text="",
+            truncated=False,
+            extractor="test",
+        ),
+    )
 
     with pytest.raises(full_text.FullTextFetchError) as exc_info:
         full_text.fetch_arxiv_fulltext("https://arxiv.org/pdf/2401.00001")
@@ -63,6 +80,7 @@ def _toolset_with_paper():
         embedding_dimension=2,
         full_text_max_papers=2,
         full_text_char_budget=500,
+        pdf_extractor="pypdf",
     )
     store = InMemoryVectorStore(embedding_dimension=2)
     store.upsert(
@@ -118,10 +136,11 @@ def _toolset_with_versioned_paper():
 
 
 def test_get_full_text_tool_returns_body_and_caches(monkeypatch):
-    calls = {"n": 0}
+    calls = {"n": 0, "extractor": None}
 
-    def fake_fetch(pdf_url, *, timeout, char_budget):
+    def fake_fetch(pdf_url, *, timeout, char_budget, **kwargs):
         calls["n"] += 1
+        calls["extractor"] = kwargs.get("extractor")
         return "FULL BODY TEXT", False
 
     monkeypatch.setattr("src.agent.toolset.fetch_arxiv_fulltext", fake_fetch)
@@ -137,6 +156,7 @@ def test_get_full_text_tool_returns_body_and_caches(monkeypatch):
     assert toolset.fulltext_error_count == 0
     assert payload["papers"][0]["full_text"] == "FULL BODY TEXT"
     assert payload["papers"][0]["title"] == "Retrieval Grounding"
+    assert calls["extractor"] == "pypdf"
 
     # Second call for the same id must hit the cache, not refetch.
     toolset.call(
@@ -148,7 +168,7 @@ def test_get_full_text_tool_returns_body_and_caches(monkeypatch):
 def test_get_full_text_respects_total_paper_budget(monkeypatch):
     monkeypatch.setattr(
         "src.agent.toolset.fetch_arxiv_fulltext",
-        lambda pdf_url, *, timeout, char_budget: ("FULL BODY TEXT", False),
+        lambda pdf_url, *, timeout, char_budget, **kwargs: ("FULL BODY TEXT", False),
     )
     toolset = _toolset_with_paper()
     # Simulate a stricter run-level budget than the default.
@@ -172,7 +192,7 @@ def test_get_full_text_respects_total_paper_budget(monkeypatch):
 
 
 def test_get_full_text_reports_error_without_failing(monkeypatch):
-    def boom(pdf_url, *, timeout, char_budget):
+    def boom(pdf_url, *, timeout, char_budget, **kwargs):
         raise RuntimeError("network down")
 
     monkeypatch.setattr("src.agent.toolset.fetch_arxiv_fulltext", boom)
@@ -213,7 +233,7 @@ def test_get_full_text_reports_bad_id_error_category():
 def test_toolset_resolves_unversioned_arxiv_ids(monkeypatch):
     monkeypatch.setattr(
         "src.agent.toolset.fetch_arxiv_fulltext",
-        lambda pdf_url, *, timeout, char_budget: ("FULL BODY TEXT", False),
+        lambda pdf_url, *, timeout, char_budget, **kwargs: ("FULL BODY TEXT", False),
     )
     toolset = _toolset_with_versioned_paper()
 

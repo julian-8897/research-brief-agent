@@ -1,8 +1,10 @@
-# Next Phase: Production-Grade Hardening
+# Next Phase: Research Brief Agent Demo
 
 Planned work for the next phase, framed around a single goal: make this project read as
-production-grade in a technical screen. A live, verifiable URL plus the engineering that
-makes a public deploy responsible is worth more than any additional feature.
+a production-grade research briefing system for AI/ML and scientific-ML engineering
+decisions. A live, verifiable URL plus the
+engineering that makes a public deploy responsible is worth more than any additional
+feature.
 
 Status when written: core works locally, tests pass (51), CI runs ruff + pytest, **not yet
 deployed**. See [PROGRESS.md](PROGRESS.md) for full current state.

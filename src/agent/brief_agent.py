@@ -616,9 +616,13 @@ class ResearchBriefAgent:
 
     def _system_prompt(self, request: BriefRequest) -> str:
         return (
-            "You are a scientific research brief agent for applied science teams.\n"
-            "Your job: research the user's question using the provided tools, then "
-            "write a cited decision memo grounded only in retrieved arXiv evidence.\n\n"
+            "You are a research brief agent for AI/ML and scientific-ML engineers "
+            "and researchers making evidence-backed engineering decisions (method "
+            "selection, architecture tradeoffs, technique adoption, deployment and "
+            "uncertainty risk).\n"
+            "Your job: investigate the user's research/engineering decision question using the "
+            "provided tools, then write a cited decision memo grounded only in "
+            "retrieved arXiv evidence.\n\n"
             "Workflow:\n"
             "1. Run at most TWO discovery rounds total using search_papers and "
             "fetch_arxiv. Do not repeat a search query you already ran.\n"
@@ -633,15 +637,15 @@ class ResearchBriefAgent:
             "4. After reading full text for 2-3 promising papers, write the memo. "
             "Do not keep broadening the paper set.\n\n"
             f"The memo must be a {request.brief_type} containing: a recommendation, "
-            "relevant methods, baselines to compare, implementation risks, explicit "
-            "uncertainty (refuse to over-claim when evidence is weak), and concrete "
-            "next steps. Cite papers inline by arXiv id, e.g. [2401.00001]. Only cite "
-            "papers returned by the tools."
+            "key evidence, tradeoffs, baselines or alternatives to compare, "
+            "implementation risks, explicit uncertainty (refuse to over-claim when "
+            "evidence is weak), and concrete next steps. Cite papers inline by arXiv "
+            "id, e.g. [2401.00001]. Only cite papers returned by the tools."
         )
 
     def _user_prompt(self, request: BriefRequest) -> str:
         return (
-            f"Research question: {request.research_question}\n"
+            f"Technical decision question: {request.research_question}\n"
             f"Domain: {request.domain or 'unspecified'}\n"
             f"Constraints: {request.constraints or []}\n"
             f"Target papers to consider: up to {request.max_papers}."
@@ -740,8 +744,9 @@ class ResearchBriefAgent:
         if not items:
             brief = (
                 "# Decision Memo\n\n"
-                "I do not have enough retrieved arXiv evidence to answer this question "
-                "reliably. Ingest a relevant corpus first, then rerun the brief.\n"
+                "I do not have enough retrieved arXiv evidence to answer this "
+                "technical decision question reliably. Ingest a relevant corpus "
+                "first, then rerun the brief.\n"
             )
             return brief, UsageEstimate(
                 input_tokens=_estimate_tokens(request.research_question),
@@ -767,7 +772,7 @@ class ResearchBriefAgent:
         brief = f"""# Decision Memo
 
 ## Recommendation
-Use the retrieved literature as a scoping signal, not as final technical proof. The current evidence suggests the question is worth pursuing if the team can validate the strongest methods against its own data and operational constraints. Key supporting papers: {citations}.
+Use the retrieved literature as a scoping signal, not as final technical proof. The current evidence suggests the option is worth pursuing if the team can validate the strongest methods against its own data, users, and operational constraints. Key supporting papers: {citations}.
 
 ## Evidence And Methods
 {methods}
@@ -775,7 +780,7 @@ Use the retrieved literature as a scoping signal, not as final technical proof. 
 ## Baselines To Compare
 - Reproduce a simple non-agent or non-neural baseline before adopting complex methods.
 - Compare against the strongest recent method represented in the retrieved papers.
-- Track latency, cost, and failure cases alongside headline accuracy or scientific metrics.
+- Track latency, cost, and failure cases alongside headline quality or task metrics.
 
 ## Constraints
 {constraints}

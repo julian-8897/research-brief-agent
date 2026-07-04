@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from math import log2
 from typing import Any
 
 from src.llm import LLMProvider, UserMessage
@@ -200,6 +201,35 @@ def score_case(final: dict[str, Any], known_ids: set[str]) -> dict[str, Any]:
     }
 
 
+def retrieval_relevance(
+    ranked_ids: list[str],
+    relevant_ids: set[str],
+    *,
+    k: int,
+) -> dict[str, Any]:
+    """Compute recall@k and nDCG@k for a ranked retrieval/citation list."""
+    if k <= 0:
+        raise ValueError("k must be positive")
+    relevant_bases = {_base_id(item) for item in relevant_ids}
+    ranked_bases = [_base_id(item) for item in ranked_ids[:k]]
+    hits = [1 if item in relevant_bases else 0 for item in ranked_bases]
+    recall = sum(hits) / len(relevant_bases) if relevant_bases else 1.0
+
+    def dcg(labels: list[int]) -> float:
+        return sum(rel / log2(index + 2) for index, rel in enumerate(labels))
+
+    ideal_hits = [1] * min(len(relevant_bases), k)
+    ideal = dcg(ideal_hits)
+    return {
+        "k": k,
+        "ranked_ids": ranked_ids[:k],
+        "relevant_ids": sorted(relevant_ids),
+        "hits": sum(hits),
+        "recall": round(recall, 4),
+        "ndcg": round(dcg(hits) / ideal, 4) if ideal else 1.0,
+    }
+
+
 def aggregate(metric_rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Roll per-case deterministic metrics up to corpus-level averages."""
     if not metric_rows:
@@ -216,9 +246,7 @@ def aggregate(metric_rows: list[dict[str, Any]]) -> dict[str, Any]:
         return round(total / n, 4)
 
     hallucinating = sum(
-        1
-        for row in metric_rows
-        if row["citation_grounding"]["hallucinated"]
+        1 for row in metric_rows if row["citation_grounding"]["hallucinated"]
     )
     return {
         "cases": n,
@@ -227,9 +255,7 @@ def aggregate(metric_rows: list[dict[str, Any]]) -> dict[str, Any]:
         "cases_with_hallucinations": hallucinating,
         "mean_full_text_rate": mean(["citation_grounding", "full_text_rate"]),
         "mean_full_text_success": mean(["evidence_utilization", "success_rate"]),
-        "uncertainty_appropriate_rate": mean(
-            ["uncertainty_signaling", "appropriate"]
-        ),
+        "uncertainty_appropriate_rate": mean(["uncertainty_signaling", "appropriate"]),
     }
 
 

@@ -39,6 +39,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+[project.optional-dependencies]
+pdf = [
+    "docling>=2.0.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=7.0.0",

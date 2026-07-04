@@ -24,9 +24,13 @@ from src.observability import Tracer
 from src.retrieval import InMemoryVectorStore, build_vector_store
 from src.settings import get_settings
 
+# Fixture runs use a tiny deterministic embedding space so the offline/CI smoke
+# path needs no model download; the app default (768) is irrelevant here.
+FIXTURE_EMBEDDING_DIMENSION = 8
+
 
 class DeterministicEmbedder:
-    def __init__(self, dimension: int = 8):
+    def __init__(self, dimension: int = FIXTURE_EMBEDDING_DIMENSION):
         self.dimension = dimension
 
     def _encode(self, texts):
@@ -45,7 +49,7 @@ class DeterministicEmbedder:
 
 
 class OfflineArxivClient:
-    def search_papers(self, query, max_results):
+    def search_papers(self, query, max_results, sort_by=None):
         return []
 
 
@@ -136,6 +140,32 @@ def render_markdown(rows: list[dict]) -> str:
                 )
             )
 
+        retrieval_rows = [
+            (row["id"], row["retrieval_eval"])
+            for row in rows
+            if row.get("retrieval_eval")
+        ]
+        if retrieval_rows:
+            lines.extend(
+                [
+                    "",
+                    "## Retrieval relevance",
+                    "",
+                    "| Case | k | Hits | Recall@k | nDCG@k |",
+                    "|---|---:|---:|---:|---:|",
+                ]
+            )
+            for case_id, retrieval in retrieval_rows:
+                lines.append(
+                    "| {case} | {k} | {hits} | {recall:.0%} | {ndcg:.0%} |".format(
+                        case=case_id,
+                        k=retrieval["k"],
+                        hits=retrieval["hits"],
+                        recall=retrieval["recall"],
+                        ndcg=retrieval["ndcg"],
+                    )
+                )
+
         summary = metrics.aggregate(metric_rows)
         lines.extend(
             [
@@ -169,7 +199,7 @@ def build_fixture_agent(fixture_path: Path, *, live_llm: bool) -> ResearchBriefA
     settings = replace(
         base_settings,
         vector_store_backend="memory",
-        embedding_dimension=8,
+        embedding_dimension=FIXTURE_EMBEDDING_DIMENSION,
         anthropic_api_key=base_settings.anthropic_api_key if live_llm else None,
         openai_api_key=base_settings.openai_api_key if live_llm else None,
     )
@@ -186,7 +216,9 @@ def build_fixture_agent(fixture_path: Path, *, live_llm: bool) -> ResearchBriefA
     vector_store.upsert(papers, embeddings)
     paper_by_id = {paper.id: paper for paper in papers}
 
-    def fixture_full_text(pdf_url: str, *, timeout: float, char_budget: int):
+    def fixture_full_text(
+        pdf_url: str, *, timeout: float, char_budget: int, **kwargs
+    ):
         paper_id = pdf_url.rstrip("/").split("/")[-1]
         paper = paper_by_id.get(paper_id)
         if paper is None:
@@ -305,20 +337,35 @@ def main():
                 else {p["id"] for p in final.get("cited_papers", [])}
             )
             case_metrics = metrics.score_case(final, known_ids)
+            retrieval_eval = _run_retrieval_eval(
+                agent, request, set(case.get("relevant_ids", []))
+            )
             row = {
                 "id": case.get("id", request.research_question[:40]),
                 "elapsed_ms": (time.perf_counter() - started) * 1000,
                 "final": final,
                 "metrics": case_metrics,
             }
+            if retrieval_eval is not None:
+                row["retrieval_eval"] = retrieval_eval
             if judge_provider is not None:
-                row["judge"] = _run_judge(
-                    judge_provider, request, final, paper_by_id
-                )
+                row["judge"] = _run_judge(judge_provider, request, final, paper_by_id)
             rows.append(row)
             handle.write(json.dumps(row) + "\n")
 
     args.markdown.write_text(render_markdown(rows), encoding="utf-8")
+
+
+def _run_retrieval_eval(agent, request, relevant_ids):
+    if not relevant_ids:
+        return None
+    retrieval = agent.tools.vector_retrieve(
+        request.research_question, request.max_papers
+    )
+    ranked_ids = [item.paper.id for item in retrieval.items]
+    return metrics.retrieval_relevance(
+        ranked_ids, relevant_ids, k=min(request.max_papers, len(ranked_ids) or 1)
+    )
 
 
 def _run_judge(provider, request, final, paper_by_id):

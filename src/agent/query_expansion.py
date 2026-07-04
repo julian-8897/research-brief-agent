@@ -25,6 +25,19 @@ _PROMPT = (
     "answering this query would be about, as if it were the paper's abstract."
 )
 
+_ARXIV_SYSTEM = (
+    "You generate compact arXiv API keyword queries for academic search. "
+    "Return only keywords and Boolean operators, no prose, no quotes, no field "
+    "prefixes such as all: or abs:."
+)
+
+_ARXIV_PROMPT = (
+    "User search query: {query}\n\n"
+    "Write a compact arXiv keyword query that preserves the user's topic while "
+    "adding canonical method names, synonyms, and related terms. Prefer a short "
+    "Boolean expression suitable for arXiv all-field search."
+)
+
 
 def expand_query(
     query: str,
@@ -59,3 +72,50 @@ def expand_query(
     if not expansion:
         return stripped, False
     return f"{stripped}. {expansion}", True
+
+
+def expand_arxiv_query(
+    query: str,
+    provider: LLMProvider | None,
+    *,
+    enabled: bool = True,
+    max_words: int = 12,
+) -> tuple[str, bool]:
+    """Return ``(arxiv_query, expanded)`` for metadata backfill.
+
+    Unlike :func:`expand_query`, this produces keyword/Boolean text for arXiv's
+    lexical API rather than prose for SPECTER embedding. It falls back to the
+    raw query when disabled, no provider is configured, the query is already
+    long/descriptive, or the provider fails.
+    """
+    stripped = query.strip()
+    if not enabled or provider is None or not stripped:
+        return stripped, False
+    if len(stripped.split()) > max_words:
+        return stripped, False
+    try:
+        turn = provider.run_turn(
+            _ARXIV_SYSTEM,
+            [UserMessage(_ARXIV_PROMPT.format(query=stripped))],
+            [],
+            tool_choice="none",
+        )
+    except Exception:
+        return stripped, False
+    expanded = _clean_arxiv_query(turn.text or "")
+    if not expanded:
+        return stripped, False
+    return expanded, True
+
+
+def _clean_arxiv_query(text: str) -> str:
+    cleaned = text.strip().strip('"').strip("'")
+    if not cleaned:
+        return ""
+    lines = [line.strip("-* \t") for line in cleaned.splitlines() if line.strip()]
+    cleaned = " ".join(lines)
+    cleaned = cleaned.replace("`", "")
+    for prefix in ("Query:", "arXiv query:", "Search query:"):
+        if cleaned.lower().startswith(prefix.lower()):
+            cleaned = cleaned[len(prefix) :].strip()
+    return " ".join(cleaned.split())

@@ -1077,7 +1077,7 @@
           <div class="brand">
             <span class="brand-lamp" aria-hidden="true"></span>
             <div class="brand-text">
-              <span class="brand-eyebrow">autonomous literature agent</span>
+              <span class="brand-eyebrow">AI/ML &amp; scientific-ML decision briefs</span>
               <h1 class="brand-name">Research Brief Agent</h1>
             </div>
             <div class="pipeline" aria-hidden="true">
@@ -1102,7 +1102,7 @@
             <div class="readout">
               <span class="readout-lamp"></span>
               <div class="readout-meta">
-                <span class="readout-label">Papers</span>
+                <span class="readout-label">Sources</span>
                 <strong id="health-papers">-</strong>
               </div>
             </div>
@@ -1137,9 +1137,9 @@
             <div class="card-body">
               <form id="brief-form" class="form-grid">
                 <div>
-                  <label for="question">Research question</label>
-                  <textarea id="question" required>What RAG methods improve factual grounding, and what are their tradeoffs?</textarea>
-                  <div class="field-hint">The agent retrieves and reads arXiv papers on its own. Just ask in plain language.</div>
+                  <label for="question">Decision question</label>
+                  <textarea id="question" required>Should an AI team use agentic RAG for technical decision briefs, and what tradeoffs matter?</textarea>
+                  <div class="field-hint">The agent retrieves and reads technical evidence on its own. Just ask in plain language.</div>
                 </div>
                 <div class="inline-grid">
                   <div>
@@ -1147,7 +1147,7 @@
                     <input id="domain" value="cs.LG" />
                   </div>
                   <div>
-                    <label for="max-papers">Max papers</label>
+                    <label for="max-papers">Max sources</label>
                     <input id="max-papers" type="number" min="1" max="50" value="6" />
                   </div>
                 </div>
@@ -1201,7 +1201,7 @@ Track latency, cost, and operational risks.</textarea>
                 <div class="split-list">
                   <div>
                     <div class="citation-list" id="citation-list">
-                      <div class="empty-state">No cited papers yet.</div>
+                      <div class="empty-state">No cited sources yet.</div>
                     </div>
                   </div>
                   <div>
@@ -1412,7 +1412,7 @@ Track latency, cost, and operational risks.</textarea>
         elements.timeline.innerHTML = "";
         elements.memo.innerHTML = '<div class="empty-state">Run in progress.</div>';
         elements.memoTag.textContent = "running";
-        elements.citations.innerHTML = '<div class="empty-state">No cited papers yet.</div>';
+        elements.citations.innerHTML = '<div class="empty-state">No cited sources yet.</div>';
         elements.warnings.innerHTML = '<div class="empty-state">No warnings yet.</div>';
         elements.diagnostics.innerHTML = '<div class="empty-state">No diagnostics yet.</div>';
         elements.metricState.textContent = "running";
@@ -1589,7 +1589,7 @@ Track latency, cost, and operational risks.</textarea>
 
       function renderCitations(citations) {
         if (!citations.length) {
-          elements.citations.innerHTML = '<div class="empty-state">No cited papers.</div>';
+          elements.citations.innerHTML = '<div class="empty-state">No cited sources.</div>';
           return;
         }
         elements.citations.innerHTML = citations.map((paper) => {

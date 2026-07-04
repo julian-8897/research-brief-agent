@@ -420,6 +420,7 @@ class ResearchToolset:
                         pdf_url,
                         timeout=settings.full_text_timeout_s,
                         char_budget=settings.full_text_char_budget,
+                        extractor=settings.pdf_extractor,
                     )
                 except FullTextFetchError as exc:
                     self._record_fulltext_error(exc.code)

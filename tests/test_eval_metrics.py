@@ -92,6 +92,18 @@ def test_score_case_combines_metrics_from_response_payload():
     assert scored["uncertainty_signaling"]["appropriate"] is True
 
 
+def test_retrieval_relevance_reports_recall_and_ndcg_at_k():
+    result = metrics.retrieval_relevance(
+        ["2401.00001", "2401.99999", "2401.00002"],
+        {"2401.00001", "2401.00002"},
+        k=3,
+    )
+
+    assert result["hits"] == 2
+    assert result["recall"] == 1.0
+    assert 1.0 > result["ndcg"] > 0.9
+
+
 def test_extract_citation_claims_pairs_each_id_with_its_sentence():
     brief = (
         "Transformers scale well [2401.00001]. "

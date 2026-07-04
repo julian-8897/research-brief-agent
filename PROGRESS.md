@@ -2,15 +2,38 @@
 
 Living status tracker for Research Brief Agent. Update this as work lands.
 
-_Last updated: 2026-06-30_
+_Last updated: 2026-07-03_
 
 ## Status at a glance
 
-The core product works end-to-end and is **runnable locally today**. Direct `uvicorn` smoke testing works without Docker: `/` serves the static UI, `/briefs/stream` emits contracted SSE events and a final `BriefResponse`, and `/papers/search` returns results. Persistent local Qdrant has now been smoke-tested with the official macOS arm64 Qdrant binary, repo-local storage under `.local/qdrant-storage`, a 3-paper arXiv ingest, semantic search, fallback brief generation, and a Qdrant+uvicorn restart that preserved `papers_indexed=3` with `retrieval_backend=qdrant` and `vector_store.fallback=false`. Live DeepSeek `deepseek-v4-flash` has been validated with the fixture corpus: 3/3 eval cases returned `ok`, no deterministic fallback, no warnings, no tool-call markup, and full-text success for all attempted papers. The Fly.io deployment manifest and image path are present, but the app has not been deployed from this checkout. The public deployment path runs the real agent loop with an LLM key, gated by `X-API-Key` and a tight per-IP limiter. Normal live synthesis is gated on successful full-text evidence when retrieved papers exist; if the run cannot meet that contract before budget/failure, the stream emits explicit degraded/error events instead of silently looking successful.
+The core product works end-to-end and is **runnable locally today**. It is scoped to a cited recommendation memo for AI/ML and scientific-ML engineering decisions; the evidence backend is arXiv/SPECTER/Qdrant only (no plan to add other source backends). Direct `uvicorn` smoke testing works without Docker: `/` serves the static UI, `/briefs/stream` emits contracted SSE events and a final `BriefResponse`, and `/papers/search` returns results. Persistent local Qdrant has now been smoke-tested with the official macOS arm64 Qdrant binary, repo-local storage under `.local/qdrant-storage`, a 3-paper arXiv ingest, semantic search, fallback brief generation, and a Qdrant+uvicorn restart that preserved `papers_indexed=3` with `retrieval_backend=qdrant` and `vector_store.fallback=false`. Live DeepSeek `deepseek-v4-flash` has been validated with the fixture corpus: 3/3 eval cases returned `ok`, no deterministic fallback, no warnings, no tool-call markup, and full-text success for all attempted papers. The Fly.io deployment manifest and image path are present, but the app has not been deployed from this checkout. The public deployment path runs the real agent loop with an LLM key, gated by `X-API-Key` and a tight per-IP limiter. Normal live synthesis is gated on successful full-text evidence when retrieved papers exist; if the run cannot meet that contract before budget/failure, the stream emits explicit degraded/error events instead of silently looking successful.
+
+## Scope (2026-07-03)
+
+- **Audience:** AI/ML and scientific-ML engineers and researchers making evidence-backed engineering decisions.
+- **Product promise:** ask a research/engineering decision question (method selection, architecture tradeoffs, technique adoption, deployment/uncertainty risk) and receive a cited memo with recommendation, evidence, tradeoffs, risks, uncertainty, and next actions.
+- **Source backend:** arXiv papers with SPECTER retrieval, arXiv backfill, and full-text PDF reading. This is deliberately the only evidence backend; the project stays a niche so brief quality can be measured, rather than generalizing into a multi-connector platform.
+- **PDF extraction:** full-text reading goes through `src/ingestion/pdf_extractors.py`; `PDF_EXTRACTOR=auto` uses optional Docling when installed and falls back to pypdf, while `PDF_EXTRACTOR=docling` can require the layout-aware backend explicitly.
+
+## Search quality follow-ups (2026-07-01)
+
+- **Backfill dedup:** vector stores now expose `existing_ids()`, and `ResearchTools.ingest_papers` skips already-indexed arXiv ids before embedding/upsert. Repeated identical backfill searches fetch metadata but embed 0 duplicate papers.
+- **Fast search default:** `SEARCH_AUTO_BACKFILL` now defaults to `false`; `/papers/search` stays local unless settings or `?backfill=true` enables arXiv coverage. Backfill can still be toggled per request.
+- **Backfill query expansion:** arXiv backfill uses a separate compact keyword/Boolean query generator (`expand_arxiv_query`) when a provider is available. It falls back to the raw query without a provider or on provider errors; semantic HyDE expansion remains separate for vector embedding.
+- **Optional reranking:** `src/rerank.py` adds a lazy Transformers cross-encoder reranker (`RERANK_ENABLED=false`, `RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2`, `RERANK_CANDIDATE_K=40`). `vector_retrieve` over-retrieves up to the configured candidate pool, then reranks the raw user query against title+abstract text.
+- **Retrieval metrics:** fixture eval cases now carry relevant ids, and `evals/metrics.py` reports recall@k and nDCG@k. Fixture validation with rerank off: retrieval recall@k 100% for all cases, nDCG@k 100%, 63%, 63%. With rerank on: recall@k 100% for all cases, nDCG@k 100%, 100%, 100%. Citation grounding remained 100%, hallucination 0%, and cited-papers-read-in-full 100% in both runs.
+- **Regression coverage:** full suite is now 95 passing with one Starlette/httpx deprecation warning, ruff clean.
+
+## Operability pass (2026-07-01)
+
+- **Persisted run records:** `/briefs/stream` now assigns `X-Request-ID` and `X-Run-ID`, enriches every SSE event with both ids, and writes append-only JSONL records under `RUN_RECORDS_DIR` (default `.local/run-records`) plus a `runs.jsonl` index. Records include request metadata, provider/model, vector backend, every streamed agent event, final diagnostics, token usage, cost, warnings, and completion status.
+- **Structured logging:** FastAPI startup configures JSON logs by default (`STRUCTURED_LOGS=true`, `LOG_LEVEL=INFO`). HTTP requests, auth/rate-limit failures, brief events, errors, and run summaries are logged with request/run ids, provider/model, timings, tool/turn counts, token usage, and degraded/fallback context.
+- **Deployment smoke status:** Fly deployment smoke is still blocked in this environment because neither `fly` nor `flyctl` is installed. Local API smoke remains runnable with `uv run uvicorn src.api.main:app --reload`.
+- **Regression coverage:** full suite covers persisted stream records and remains hermetic by disabling `RUN_RECORDS_DIR` in tests unless a test opts into a temp directory.
 
 ## Frontend redesign and ask-first UX (2026-06-30)
 
-- **Retrieval-quality fixes.** `search_papers` now embeds descriptive query text built from the brief's research question, model query, and constraints while preserving the model's original displayed query; `RETRIEVAL_MIN_SCORE` adds an optional relevance floor with an empty-result hint that steers the model to `fetch_arxiv`.
+- **Retrieval-quality fixes.** `search_papers` now embeds descriptive query text built from the brief's decision question, model query, and constraints while preserving the model's original displayed query; `RETRIEVAL_MIN_SCORE` adds an optional relevance floor with an empty-result hint that steers the model to `fetch_arxiv`.
 - **SPECTER2 asymmetric embeddings.** Paper indexing now uses `allenai/specter2_base` with the `allenai/specter2` proximity adapter, while retrieval queries use the `allenai/specter2_adhoc_query` adapter. Adapter switching and forward passes are locked so concurrent FastAPI requests do not race shared model state.
 - **Console redesign.** `static/index.html` was reworked from a generic gray dashboard into a single-page console: a deep-ink instrument surface with a warm-paper memo, a streaming reasoning-spine timeline, a telemetry gauge cluster, and masthead health readouts (Space Grotesk / Fraunces / IBM Plex Mono from Google Fonts). The agent/SSE wiring is unchanged; only markup and CSS were rewritten.
 - **Ask-first UI.** The page is now a single "Ask the agent" flow. The manual corpus tools (ingest form, search preview) were removed from the UI because the agent backfills arXiv itself via `fetch_arxiv`; the orphaned "Search Results" tab and its now-dead JS were removed. The `/ingest` and `/papers/search` endpoints remain available programmatically.
@@ -38,10 +61,8 @@ The core product works end-to-end and is **runnable locally today**. Direct `uvi
 These are the highest-priority guard-rail gaps still open.
 
 1. **Live eval report now has a clean DeepSeek fixture run, but needs a commit decision.** `evals/reports/deepseek-v4-flash-fixture.{jsonl,md}` records the latest live fixture-corpus run. It should either be committed as a qualified provider-cost report or regenerated as `latest.*` before release.
-2. **No persisted run records.** SSE events and final diagnostics are visible in the browser but not saved for replay, debugging, or provider comparisons.
-3. **Structured logging is still thin.** Request IDs, tool-call timing, per-run token counts, fallback/degraded reasons, and provider/model identity should be logged as JSON.
-4. **Static UI is useful but not yet a robust operator console.** It visualizes the run, but it does not yet expose config budgets, model/provider identity, retry controls, or persisted run history.
-5. **Deployment still needs a live smoke.** Fly config exists, but this checkout has not been deployed and validated against a public URL.
+2. **Static UI is useful but not yet a robust operator console.** It visualizes the run, but it does not yet expose config budgets, model/provider identity, retry controls, or persisted run history.
+3. **Deployment still needs a live smoke.** Fly config exists, but this checkout has not been deployed and validated against a public URL; local Fly CLI tooling is missing in this environment.
 
 ## DeepSeek V4 agent-loop policy fixes
 
@@ -89,13 +110,12 @@ Confirmed the OpenAI-compatible backend works against a local model: the agent l
 - Eval harness exists (`evals/run_eval.py`, benchmark fixtures) and the latest named live DeepSeek fixture report is in `evals/reports/deepseek-v4-flash-fixture.{jsonl,md}`. Decide whether to commit that named report, regenerate `latest.*`, or keep reports untracked before release.
 - `evals/run_eval.py --fixture-corpus` runs the configured live LLM against deterministic fixture papers and synthetic full text, so provider cost can be measured without external retrieval dependencies.
 - Direct uvicorn smoke testing works in local fallback mode and persistent Qdrant mode. The persistent test used a 3-paper corpus to stay light on an 8GB MacBook, verified ingest/search/brief, then restarted Qdrant and uvicorn to confirm the collection persisted.
-- Static UI (`static/index.html`) provides an ask-first console: a single research-question form, masthead health readouts, a streaming reasoning-spine timeline, telemetry gauges, evidence/diagnostics tabs, and the final memo. Manual ingest and search preview were removed from the page (the agent backfills arXiv itself); both endpoints stay available via the API. It is still a single-file prototype and should be treated as an observability surface, not a production UI.
+- Static UI (`static/index.html`) provides an ask-first console: a single technical decision-question form, masthead health readouts, a streaming reasoning-spine timeline, telemetry gauges, evidence/diagnostics tabs, and the final memo. Manual ingest and search preview were removed from the page (the agent backfills arXiv itself); both endpoints stay available via the API. It is still a single-file prototype and should be treated as an observability surface, not a production UI.
 - arXiv date-filter failures are surfaced as JSON at the API boundary. The UI-side retry-without-date-range fallback was removed along with the ingest form, so programmatic `/ingest` callers handle this themselves. The underlying arXiv API remains flaky for some filtered queries, especially date ranges close to the current date.
 - DeepSeek V4 live behaviour is improved and revalidated; token use is now measured in the fixture report, but real-corpus costs still need a production budget.
 
 ## Not started / gaps before "deployable"
 
-- **No persisted run records** for replay/debugging. Once an SSE run finishes, the event stream is only in the browser.
 - **Docker image not yet built/run** this session — compose is defined but intentionally deferred because the next local smoke target is direct uvicorn + separately started Qdrant.
 - Real agent briefs require `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`; otherwise only the fallback memo is produced.
 
@@ -109,7 +129,7 @@ uv run uvicorn src.api.main:app --port 8000 &
 curl -s http://localhost:8000/health
 curl -N -X POST http://localhost:8000/briefs/stream \
   -H 'content-type: application/json' \
-  -d '{"research_question":"How can retrieval improve scientific literature review?","max_papers":3}'
+  -d '{"research_question":"What methods help source-grounded technical decision briefs?","max_papers":3}'
 ```
 
 Persistent local Qdrant path:
@@ -129,7 +149,7 @@ curl -X POST http://localhost:8000/ingest \
   -H 'content-type: application/json' -d '{"query":"cat:cs.LG","max_papers":25}'
 curl -N -X POST http://localhost:8000/briefs/stream \
   -H 'content-type: application/json' \
-  -d '{"research_question":"What methods are promising for retrieval-augmented scientific review?","domain":"cs.LG","max_papers":6}'
+  -d '{"research_question":"Should an AI team use agentic RAG for technical decision briefs?","domain":"cs.LG","max_papers":6}'
 ```
 
 Full persistent Docker stack, when needed: `cp .env.example .env && docker compose up --build`, then open `http://localhost:8000`.
@@ -138,5 +158,5 @@ Full persistent Docker stack, when needed: `cp .env.example .env && docker compo
 
 1. Commit or explicitly qualify the live DeepSeek fixture eval report, and decide whether `latest.*` should be regenerated from the named report before release.
 2. Persist run transcripts and diagnostics so brittle model behaviour can be replayed, evaluated, and compared across model/provider changes.
-3. Add structured JSON logging with request IDs, provider/model identity, tool timings, token counts, and degraded/fallback reasons.
+3. Install Fly CLI and run the production smoke: deploy, hit `/health`, ingest a tiny corpus, stream one brief, restart the machine, and confirm Qdrant persistence plus run-record/log output.
 4. Deploy the Fly app with real secrets, ingest a seed corpus, and run an end-to-end public URL smoke test.

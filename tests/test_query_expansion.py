@@ -1,4 +1,4 @@
-from src.agent.query_expansion import expand_query
+from src.agent.query_expansion import expand_arxiv_query, expand_query
 from src.llm import TurnResult
 
 
@@ -69,3 +69,22 @@ def test_expand_query_falls_back_on_provider_error():
 def test_expand_query_ignores_empty_expansion():
     provider = FakeProvider(text="   ")
     assert expand_query("neural operators", provider) == ("neural operators", False)
+
+
+def test_expand_arxiv_query_returns_keyword_boolean_query():
+    provider = FakeProvider(
+        text="Query: neural operators OR DeepONet OR Fourier Neural Operator"
+    )
+
+    text, expanded = expand_arxiv_query("neural operators", provider)
+
+    assert expanded is True
+    assert text == "neural operators OR DeepONet OR Fourier Neural Operator"
+    assert provider.calls == 1
+
+
+def test_expand_arxiv_query_falls_back_without_provider():
+    assert expand_arxiv_query("neural operators", None) == (
+        "neural operators",
+        False,
+    )

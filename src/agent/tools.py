@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass
 
-from src.agent.query_expansion import expand_query
+from src.agent.query_expansion import expand_arxiv_query, expand_query
 from src.arxiv_client import ArxivClient
 from src.embeddings import TextEmbedder, build_paper_embedding_text
 from src.ingestion import fetch_arxiv_papers
@@ -12,6 +12,7 @@ from src.models import (
     SearchResponse,
     SearchResponseItem,
 )
+from src.rerank import CrossEncoderReranker, Reranker
 from src.retrieval import PaperVectorStore
 from src.settings import Settings
 
@@ -30,12 +31,16 @@ class ResearchTools:
         embedder: TextEmbedder,
         vector_store: PaperVectorStore,
         llm: LLMProvider | None = None,
+        reranker: Reranker | None = None,
     ):
         self.settings = settings
         self.arxiv_client = arxiv_client
         self.embedder = embedder
         self.vector_store = vector_store
         self.llm = llm
+        self.reranker = reranker
+        if self.reranker is None and self.settings.rerank_enabled:
+            self.reranker = CrossEncoderReranker(self.settings.rerank_model)
 
     def arxiv_metadata_search(self, request: BriefRequest):
         domain_part = (
@@ -59,15 +64,26 @@ class ResearchTools:
         query_embedding = self.embedder.encode_queries(
             [embed_text or query], batch_size=self.settings.embedding_batch_size
         )[0]
-        items = self.vector_store.search(
-            query_embedding, k=min(k, self.settings.max_retrieval_results)
-        )
+        candidate_k = min(k, self.settings.max_retrieval_results)
+        if self.reranker is not None:
+            candidate_k = max(
+                candidate_k,
+                min(
+                    self.settings.rerank_candidate_k,
+                    self.settings.max_retrieval_results,
+                ),
+            )
+        items = self.vector_store.search(query_embedding, k=candidate_k)
         if self.settings.retrieval_min_score > 0.0:
             items = [
                 item
                 for item in items
                 if item.score >= self.settings.retrieval_min_score
             ]
+        if self.reranker is not None:
+            items = self.reranker.rerank(query, items, top_k=k)
+        else:
+            items = items[:k]
         latency_ms = (time.perf_counter() - started) * 1000
         scores = [item.score for item in items]
         return RetrievalResult(
@@ -100,11 +116,15 @@ class ResearchTools:
     def ingest_papers(self, papers) -> int:
         if not papers:
             return 0
-        texts = [build_paper_embedding_text(paper.model_dump()) for paper in papers]
+        existing = self.vector_store.existing_ids([paper.id for paper in papers])
+        new_papers = [paper for paper in papers if paper.id not in existing]
+        if not new_papers:
+            return 0
+        texts = [build_paper_embedding_text(paper.model_dump()) for paper in new_papers]
         embeddings = self.embedder.encode_documents(
             texts, batch_size=self.settings.embedding_batch_size
         )
-        return self.vector_store.upsert(papers, embeddings)
+        return self.vector_store.upsert(new_papers, embeddings)
 
     def extract_evidence(self, items: list[SearchResponseItem]) -> list[dict]:
         evidence = []
@@ -146,9 +166,7 @@ class ResearchTools:
 
         ``expand``/``backfill`` override the configured defaults when set.
         """
-        do_expand = (
-            self.settings.query_expansion_enabled if expand is None else expand
-        )
+        do_expand = self.settings.query_expansion_enabled if expand is None else expand
         do_backfill = (
             self.settings.search_auto_backfill if backfill is None else backfill
         )
@@ -159,11 +177,16 @@ class ResearchTools:
             enabled=do_expand,
             max_words=self.settings.query_expansion_max_words,
         )
-
         backfilled = 0
         if do_backfill:
+            arxiv_query, _arxiv_expanded = expand_arxiv_query(
+                query,
+                self.llm if self.settings.search_backfill_query_expansion else None,
+                enabled=self.settings.search_backfill_query_expansion,
+                max_words=self.settings.query_expansion_max_words,
+            )
             backfilled, _papers = self.fetch_and_ingest(
-                query, self.settings.search_backfill_max_papers
+                arxiv_query, self.settings.search_backfill_max_papers
             )
 
         result = self.vector_retrieve(query, k, embed_text=embed_text)
