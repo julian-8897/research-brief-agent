@@ -264,6 +264,11 @@ def main():
         default=Path("evals/reports/latest.md"),
     )
     parser.add_argument(
+        "--core",
+        action="store_true",
+        help="Run only the core-tagged benchmark subset (fast tuning-iteration loop).",
+    )
+    parser.add_argument(
         "--offline-fixture",
         action="store_true",
         help="Run with fixture papers and deterministic embeddings for CI smoke tests.",
@@ -326,6 +331,8 @@ def main():
     args.jsonl.parent.mkdir(parents=True, exist_ok=True)
     with args.jsonl.open("w", encoding="utf-8") as handle:
         for case in load_cases(args.cases):
+            if args.core and not case.get("core"):
+                continue
             request = BriefRequest(**case)
             started = time.perf_counter()
             final = asyncio.run(_collect(agent, request))
