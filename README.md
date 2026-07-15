@@ -91,6 +91,34 @@ cp .env.example .env
 docker compose up --build
 ```
 
+For a repeatable production-mode release smoke, use the isolated smoke stack. It
+enables required API-key auth and run-record persistence, pins Qdrant 1.18.0, and
+uses a deterministic OpenAI-compatible provider that drives the real
+`search_papers` → `get_full_text` → synthesis loop:
+
+```bash
+docker compose -f docker-compose.smoke.yml up --build -d
+curl http://127.0.0.1:8767/health
+curl -X POST http://127.0.0.1:8767/ingest \
+  -H 'content-type: application/json' \
+  -H 'X-API-Key: smoke-api-key' \
+  -d '{"query":"all:retrieval augmented generation","max_papers":2}'
+curl -N -X POST http://127.0.0.1:8767/briefs/stream \
+  -H 'content-type: application/json' \
+  -H 'X-API-Key: smoke-api-key' \
+  -d '{"research_question":"Should an AI team use retrieval-augmented generation for technical decision support?","max_papers":2}'
+```
+
+The smoke still uses live arXiv metadata/PDF access for ingest and full-text reading;
+only the LLM provider is deterministic. Its named volumes are isolated from the
+default Compose stack. Do not mount an existing Qdrant 1.9.x volume directly into
+1.18.0: the storage formats are not directly compatible across that jump, so migrate
+through a supported snapshot/export path first.
+
+The Linux image resolves PyTorch from the explicit CPU wheel index and bakes the
+SPECTER2 base model and both adapters. The verified local artifact is 2.06 GB, down
+from 11.27 GB before removing CUDA runtime packages.
+
 Use the API directly:
 
 ```bash
@@ -171,6 +199,20 @@ LLM_PROVIDER=openai OPENAI_BASE_URL=https://api.deepseek.com OPENAI_MODEL=deepse
   uv run python evals/run_eval.py --fixture-corpus
 ```
 
+CI also runs the hermetic core benchmark as a deterministic quality gate:
+
+```bash
+uv run python evals/run_eval.py --offline-fixture --core --quality-gate \
+  --jsonl /tmp/research-brief-core-eval.jsonl \
+  --markdown /tmp/research-brief-core-eval.md
+```
+
+The fixture corpus contains one synthetic relevant paper per benchmark case.
+The gate fails on missing fixture coverage, zero-hit retrieval, warnings,
+hallucinated citations, or inappropriate uncertainty signaling. It validates
+offline retrieval and response contracts; full-text usage remains a live-agent
+metric because the no-key fallback does not run the tool loop.
+
 When `OPENAI_BASE_URL=https://api.deepseek.com` and `OPENAI_MODEL=deepseek-v4*`,
 the OpenAI-compatible adapter disables DeepSeek thinking mode so the agent receives
 normal assistant `content` and tool calls instead of spending the output budget on
@@ -202,7 +244,7 @@ uv run uvicorn src.api.main:app --reload
 Current verification:
 
 ```text
-51 passed, 1 warning; ruff clean
+112 passed, 1 warning; ruff clean; 7-case offline core quality gate passing
 ```
 
 ## Project Structure

@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import sys
 import time
 from dataclasses import replace
@@ -24,9 +25,11 @@ from src.observability import Tracer
 from src.retrieval import InMemoryVectorStore, build_vector_store
 from src.settings import get_settings
 
-# Fixture runs use a tiny deterministic embedding space so the offline/CI smoke
-# path needs no model download; the app default (768) is irrelevant here.
-FIXTURE_EMBEDDING_DIMENSION = 8
+# Fixture runs use deterministic feature-hashed lexical embeddings so the
+# offline/CI path needs no model download while still exercising a meaningful
+# retrieval contract. The app default (768) is irrelevant here.
+FIXTURE_EMBEDDING_DIMENSION = 256
+_FIXTURE_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
 class DeterministicEmbedder:
@@ -34,12 +37,23 @@ class DeterministicEmbedder:
         self.dimension = dimension
 
     def _encode(self, texts):
-        vectors = []
+        vectors: list[np.ndarray] = []
         for text in texts:
-            digest = hashlib.sha256(text.lower().encode("utf-8")).digest()
-            values = [digest[i] / 255 for i in range(self.dimension)]
-            vectors.append(values)
-        return np.array(vectors, dtype="float32")
+            vector = np.zeros(self.dimension, dtype="float32")
+            for token in _FIXTURE_TOKEN_RE.findall(text.lower()):
+                digest = hashlib.sha256(token.encode("utf-8")).digest()
+                index = int.from_bytes(digest[:4], "big") % self.dimension
+                sign = 1.0 if digest[4] & 1 else -1.0
+                vector[index] += sign
+            norm = np.linalg.norm(vector)
+            if norm:
+                vector /= norm
+            vectors.append(vector)
+        return (
+            np.stack(vectors)
+            if vectors
+            else np.empty((0, self.dimension), dtype="float32")
+        )
 
     def encode_documents(self, texts, batch_size=32):
         return self._encode(texts)
@@ -68,6 +82,55 @@ def load_cases(path: Path):
         for line in handle:
             if line.strip():
                 yield json.loads(line)
+
+
+def fixture_coverage_failures(cases: list[dict], fixture_ids: set[str]) -> list[str]:
+    """Report benchmark cases with no relevant paper in the fixture corpus."""
+    failures = []
+    for case in cases:
+        relevant_ids = set(case.get("relevant_ids", []))
+        if relevant_ids and fixture_ids.isdisjoint(relevant_ids):
+            failures.append(
+                f"{case.get('id', '<unnamed>')}: expected one of {sorted(relevant_ids)}"
+            )
+    return failures
+
+
+def quality_gate_failures(rows: list[dict]) -> list[str]:
+    """Return deterministic quality failures suitable for a CI exit code."""
+    if not rows:
+        return ["no evaluation cases ran"]
+
+    failures = []
+    for row in rows:
+        case_id = row["id"]
+        final = row["final"]
+        case_metrics = row["metrics"]
+        warnings = final.get("warnings") or []
+        if warnings:
+            failures.append(f"{case_id}: unexpected warnings: {warnings}")
+
+        grounding = case_metrics["citation_grounding"]
+        if grounding["hallucinated"]:
+            failures.append(
+                f"{case_id}: hallucinated citations: {grounding['hallucinated']}"
+            )
+        if grounding["grounding_rate"] < 1.0:
+            failures.append(
+                f"{case_id}: citation grounding was {grounding['grounding_rate']:.0%}"
+            )
+
+        uncertainty = case_metrics["uncertainty_signaling"]
+        if not uncertainty["appropriate"]:
+            failures.append(f"{case_id}: uncertainty signaling was inappropriate")
+
+        retrieval = row.get("retrieval_eval")
+        if retrieval is not None and retrieval["hits"] < 1:
+            failures.append(
+                f"{case_id}: retrieval returned no relevant paper in its top "
+                f"{retrieval['k']} results"
+            )
+    return failures
 
 
 def render_markdown(rows: list[dict]) -> str:
@@ -216,9 +279,7 @@ def build_fixture_agent(fixture_path: Path, *, live_llm: bool) -> ResearchBriefA
     vector_store.upsert(papers, embeddings)
     paper_by_id = {paper.id: paper for paper in papers}
 
-    def fixture_full_text(
-        pdf_url: str, *, timeout: float, char_budget: int, **kwargs
-    ):
+    def fixture_full_text(pdf_url: str, *, timeout: float, char_budget: int, **kwargs):
         paper_id = pdf_url.rstrip("/").split("/")[-1]
         paper = paper_by_id.get(paper_id)
         if paper is None:
@@ -294,10 +355,22 @@ def main():
             "(requires a configured provider key)."
         ),
     )
+    parser.add_argument(
+        "--quality-gate",
+        action="store_true",
+        help=(
+            "Exit non-zero on warnings, hallucinated citations, inappropriate "
+            "uncertainty, or zero-hit retrieval."
+        ),
+    )
     args = parser.parse_args()
 
     if args.offline_fixture and args.fixture_corpus:
         raise SystemExit("Use only one of --offline-fixture or --fixture-corpus")
+
+    cases = [
+        case for case in load_cases(args.cases) if not args.core or case.get("core")
+    ]
 
     if args.offline_fixture:
         agent, paper_by_id = build_fixture_agent(args.fixture_papers, live_llm=False)
@@ -323,6 +396,15 @@ def main():
         )
         paper_by_id = {}
 
+    if args.offline_fixture or args.fixture_corpus:
+        coverage_failures = fixture_coverage_failures(cases, set(paper_by_id))
+        if coverage_failures:
+            details = "\n".join(f"- {failure}" for failure in coverage_failures)
+            raise SystemExit(
+                "Fixture corpus does not cover the selected benchmark cases:\n"
+                f"{details}"
+            )
+
     judge_provider = build_llm_provider(settings) if args.judge else None
     if args.judge and judge_provider is None:
         print("warning: --judge requested but no provider configured; skipping judge")
@@ -330,9 +412,7 @@ def main():
     rows = []
     args.jsonl.parent.mkdir(parents=True, exist_ok=True)
     with args.jsonl.open("w", encoding="utf-8") as handle:
-        for case in load_cases(args.cases):
-            if args.core and not case.get("core"):
-                continue
+        for case in cases:
             request = BriefRequest(**case)
             started = time.perf_counter()
             final = asyncio.run(_collect(agent, request))
@@ -361,6 +441,11 @@ def main():
             handle.write(json.dumps(row) + "\n")
 
     args.markdown.write_text(render_markdown(rows), encoding="utf-8")
+    if args.quality_gate:
+        failures = quality_gate_failures(rows)
+        if failures:
+            details = "\n".join(f"- {failure}" for failure in failures)
+            raise SystemExit(f"Evaluation quality gate failed:\n{details}")
 
 
 def _run_retrieval_eval(agent, request, relevant_ids):

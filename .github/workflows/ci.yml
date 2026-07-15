@@ -35,3 +35,12 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+      - name: Offline core evaluation quality gate
+        run: >-
+          uv run python evals/run_eval.py
+          --offline-fixture
+          --core
+          --quality-gate
+          --jsonl /tmp/research-brief-core-eval.jsonl
+          --markdown /tmp/research-brief-core-eval.md

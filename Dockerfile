@@ -1,4 +1,5 @@
-FROM qdrant/qdrant:v1.9.2 AS qdrant
+ARG QDRANT_VERSION=1.18.0
+FROM qdrant/qdrant:v${QDRANT_VERSION} AS qdrant
 
 FROM python:3.12-slim
 
@@ -17,22 +18,20 @@ ENV EMBEDDING_QUERY_ADAPTER=${EMBEDDING_QUERY_ADAPTER}
 WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.24 /uv /uvx /bin/
-COPY --from=qdrant /qdrant /qdrant
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+RUN python -c "import os; from adapters import AutoAdapterModel; from transformers import AutoTokenizer; model_name = os.environ['EMBEDDING_MODEL']; AutoTokenizer.from_pretrained(model_name); model = AutoAdapterModel.from_pretrained(model_name); model.load_adapter(os.environ['EMBEDDING_DOCUMENT_ADAPTER'], load_as='proximity'); model.load_adapter(os.environ['EMBEDDING_QUERY_ADAPTER'], load_as='adhoc_query')"
+
 COPY src ./src
 COPY static ./static
 COPY config ./config
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
-RUN uv sync --frozen --no-dev
-RUN python -c "import os; from adapters import AutoAdapterModel; from transformers import AutoTokenizer; model_name = os.environ['EMBEDDING_MODEL']; AutoTokenizer.from_pretrained(model_name); model = AutoAdapterModel.from_pretrained(model_name); model.load_adapter(os.environ['EMBEDDING_DOCUMENT_ADAPTER'], load_as='proximity'); model.load_adapter(os.environ['EMBEDDING_QUERY_ADAPTER'], load_as='adhoc_query')"
-
+COPY --from=qdrant /qdrant /qdrant
 COPY docker ./docker
-RUN chmod +x docker/fly-start.sh
+RUN chmod +x docker/*.sh
 
 EXPOSE 8000
 

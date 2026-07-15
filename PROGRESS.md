@@ -2,11 +2,116 @@
 
 Living status tracker for Research Brief Agent. Update this as work lands.
 
-_Last updated: 2026-07-03_
+_Last updated: 2026-07-13_
+
+## Current review (2026-07-13)
+
+- **Verification:** `uv run pytest -q` passes with **112 tests** and one
+  Starlette/httpx deprecation warning on Python 3.12; `uv run ruff check .` is clean.
+- **Release posture:** the service is now a packaged local alpha rather than only a
+  source-level demo. The production-mode Docker path passed auth, readiness, ingest,
+  multi-tool brief, run-record/log, and restart-persistence checks. A clean-checkout
+  build and public Fly smoke are still required before a production claim.
+- **Eval quality gate restored:** the offline corpus now contains one explicit
+  synthetic relevant paper per benchmark case and uses deterministic lexical
+  feature-hash embeddings rather than whole-text hash vectors. Both the seven-case
+  core run and all 16 cases pass with a relevant hit at rank one, 100% citation-ID
+  grounding, no warnings, and no hallucinated ids. CI runs the core gate. The 33%
+  recall is expected because the small fixture represents one of each case's three
+  live-corpus relevance ids; full-text remains a live-agent metric.
+- **Reporting drift:** `README.md`, older sections of this file, `NEXT_PHASE.md`, and
+  `evals/reports/latest.*` report historical test totals or superseded eval state. The
+  named DeepSeek report is still the strongest live-model evidence; the release-facing
+  status and `latest.*` report need one deliberate refresh.
+- **Container compatibility:** `qdrant-client` 1.18 failed against the previously
+  pinned Qdrant 1.9.2 query API. The image and both Compose files now pin Qdrant
+  1.18.0. A direct 1.9.2-volume-to-1.18.0 startup also failed, so existing 1.9 data
+  requires a supported snapshot/export migration rather than an in-place version
+  jump.
+- **Runtime metadata:** Docker targets Python 3.12 and CI targets 3.13, while package
+  metadata declares an open-ended `>=3.10`. Local verification initially selected
+  Python 3.14 and could not collect tests until the environment was synchronized on
+  3.12. Pin the contributor runtime or add a tested-version matrix/upper bound.
+- **Review artifact:** [docs/project-brief.html](docs/project-brief.html) is a
+  self-contained snapshot of product maturity, evidence, risks, and recommended next
+  steps from this review.
+
+## Current implementation checklist
+
+This is the active, ordered checklist. Update it in the same change that completes an
+item. **Active next: public Fly smoke and release evidence freeze.**
+
+### P0 — Evaluation integrity
+
+- [x] Give every benchmark case at least one relevant paper in the offline fixture.
+- [x] Replace random whole-text fixture vectors with deterministic lexical embeddings.
+- [x] Add a CLI quality gate for warnings, citation validity, uncertainty, and
+  zero-hit retrieval.
+- [x] Add focused regression tests for fixture coverage, lexical similarity, and
+  actionable gate failures.
+- [x] Run the seven-case core gate in CI without keys, network, or model downloads.
+
+### P0 — Packaged release smoke
+
+- [x] Build the current locked working tree as a production image and record its size.
+- [x] Start API + Qdrant and wait for readiness.
+- [x] Ingest a tiny corpus and stream one authenticated brief.
+- [x] Confirm JSONL run records and structured summary logs for the same run.
+- [x] Restart the stack and verify Qdrant corpus persistence.
+- [ ] Rebuild the committed release candidate from a clean checkout or CI runner.
+- [ ] Repeat the critical path on Fly and record the public health/brief evidence.
+
+### Packaged smoke evidence (2026-07-13)
+
+- Built `research-brief-agent:release-smoke` from the frozen lock. Selecting the
+  explicit Linux CPU PyTorch index reduced the image from **11.27 GB** to **2.06 GB**
+  (about **82% smaller**) while keeping the SPECTER2 base model, document/query
+  adapters, and Qdrant binary baked into the artifact. Final local digest:
+  `sha256:dbfe3bfb7fa7afb57841315caf45503a1d8ed97bd95d567c67921fb1dab07521`.
+- Started `docker-compose.smoke.yml` in `ENVIRONMENT=production` with Qdrant 1.18.0,
+  required API-key auth, required JSONL records, structured logs, and a deterministic
+  OpenAI-compatible tool-use provider. `/health` returned ready with the persistent
+  Qdrant backend and two indexed papers; an unauthenticated brief returned 401.
+- Final-source run `e9915f9e9f6844bf94d671953220300f` completed
+  `search_papers` → `get_full_text` → synthesis, retrieved two papers, read one full
+  PDF, cited that paper, used three provider turns and two tool calls, and returned no
+  warnings. End-to-end latency was **10.52 s** on the first post-rebuild request
+  (including **8.12 s** retrieval and lazy embedding-model initialization); measured mock-provider
+  usage was 420 input / 228 output tokens with a configured **$0.00468** estimate.
+- The matching `run_started`/`run_finished` JSONL entries and structured
+  `brief_run_finished` log reported `status=completed`. Restarting API and Qdrant
+  preserved both `papers_indexed=2` and the completed run record.
+- Verification after the smoke: **112 tests passed**, Ruff clean, and the seven-case
+  offline core quality gate passed with rank-one relevant hits, 100% citation-ID
+  grounding, no hallucinated ids, and no warnings.
+
+### P1 — Release evidence of record
+
+- [ ] Decide whether the named DeepSeek report or a regenerated `latest.*` is the
+  release-facing live-provider artifact.
+- [ ] Refresh `README.md`, `NEXT_PHASE.md`, and stale report prose from one verified
+  snapshot.
+- [ ] Capture Langfuse trace coverage, measured tokens, cost, and run-record ids for a
+  single live release-smoke run.
+
+### P1 — Runtime support contract
+
+- [ ] Pin the contributor Python runtime or bound `requires-python`.
+- [ ] Test the supported Python versions in CI and document the matrix.
+
+### P2 — Operator experience
+
+- [ ] Expose provider/model and active agent budgets in the console.
+- [ ] Add retry controls and a persisted run-history view.
+
+### P2 — Release engineering
+
+- [ ] Move the Dockerfile's `README.md` copy after the dependency/model bake so a
+  documentation-only change does not invalidate the expensive SPECTER2 cache layer.
 
 ## Status at a glance
 
-The core product works end-to-end and is **runnable locally today**. It is scoped to a cited recommendation memo for AI/ML and scientific-ML engineering decisions; the evidence backend is arXiv/SPECTER/Qdrant only (no plan to add other source backends). Direct `uvicorn` smoke testing works without Docker: `/` serves the static UI, `/briefs/stream` emits contracted SSE events and a final `BriefResponse`, and `/papers/search` returns results. Persistent local Qdrant has now been smoke-tested with the official macOS arm64 Qdrant binary, repo-local storage under `.local/qdrant-storage`, a 3-paper arXiv ingest, semantic search, fallback brief generation, and a Qdrant+uvicorn restart that preserved `papers_indexed=3` with `retrieval_backend=qdrant` and `vector_store.fallback=false`. Live DeepSeek `deepseek-v4-flash` has been validated with the fixture corpus: 3/3 eval cases returned `ok`, no deterministic fallback, no warnings, no tool-call markup, and full-text success for all attempted papers. The Fly.io deployment manifest and image path are present, but the app has not been deployed from this checkout. The public deployment path runs the real agent loop with an LLM key, gated by `X-API-Key` and a tight per-IP limiter. Normal live synthesis is gated on successful full-text evidence when retrieved papers exist; if the run cannot meet that contract before budget/failure, the stream emits explicit degraded/error events instead of silently looking successful.
+The core product works end-to-end and is **runnable locally today**. It is scoped to a cited recommendation memo for AI/ML and scientific-ML engineering decisions; the evidence backend is arXiv/SPECTER/Qdrant only (no plan to add other source backends). Direct `uvicorn` smoke testing works without Docker, and the production-mode Docker Compose path now has a recorded two-paper ingest, authenticated multi-tool brief, full-text read, structured logs, required run records, and API/Qdrant restart with persistence. The final local image is 2.06 GB and uses CPU-only PyTorch. Live DeepSeek `deepseek-v4-flash` has been validated with the fixture corpus: 3/3 eval cases returned `ok`, no deterministic fallback, no warnings, no tool-call markup, and full-text success for all attempted papers. The Fly.io deployment manifest and image path are present, but the app has not been deployed from this checkout. The public deployment path runs the real agent loop with an LLM key, gated by `X-API-Key` and a tight per-IP limiter. Normal live synthesis is gated on successful full-text evidence when retrieved papers exist; if the run cannot meet that contract before budget/failure, the stream emits explicit degraded/error events instead of silently looking successful.
 
 ## Scope (2026-07-03)
 
@@ -28,7 +133,9 @@ The core product works end-to-end and is **runnable locally today**. It is scope
 
 - **Persisted run records:** `/briefs/stream` now assigns `X-Request-ID` and `X-Run-ID`, enriches every SSE event with both ids, and writes append-only JSONL records under `RUN_RECORDS_DIR` (default `.local/run-records`) plus a `runs.jsonl` index. Records include request metadata, provider/model, vector backend, every streamed agent event, final diagnostics, token usage, cost, warnings, and completion status.
 - **Structured logging:** FastAPI startup configures JSON logs by default (`STRUCTURED_LOGS=true`, `LOG_LEVEL=INFO`). HTTP requests, auth/rate-limit failures, brief events, errors, and run summaries are logged with request/run ids, provider/model, timings, tool/turn counts, token usage, and degraded/fallback context.
-- **Deployment smoke status:** Fly deployment smoke is still blocked in this environment because neither `fly` nor `flyctl` is installed. Local API smoke remains runnable with `uv run uvicorn src.api.main:app --reload`.
+- **Deployment smoke status:** the production-mode local Compose smoke passed on
+  2026-07-13. Fly remains unverified because neither `fly` nor `flyctl` is installed
+  in this environment.
 - **Regression coverage:** full suite covers persisted stream records and remains hermetic by disabling `RUN_RECORDS_DIR` in tests unless a test opts into a temp directory.
 
 ## Frontend redesign and ask-first UX (2026-06-30)
@@ -101,7 +208,11 @@ Confirmed the OpenAI-compatible backend works against a local model: the agent l
 - Langfuse tracing spans for every turn and tool call (no-ops without keys).
 - Deterministic offline fallback memo so local runs and CI work without keys/network.
 - Tests: 59 passing with one Starlette/httpx deprecation warning, ruff clean. Includes faked-SDK tests for both providers' wire translation and `tool_choice`, plus DeepSeek V4 thinking-mode compatibility, full-text evidence-gate, SSE contract, plain-query normalization, asymmetric embedding adapter activation, and degraded-fallback regressions.
-- Container setup: `Dockerfile` (uv, frozen lock, baked SPECTER cache, Fly Qdrant sidecar binary) and `docker-compose.yml` (API + Qdrant v1.9.2 with a volume).
+- Container setup: `Dockerfile` (uv, frozen lock, explicit CPU-only Linux PyTorch,
+  baked SPECTER cache, Fly Qdrant 1.18.0 sidecar binary), `docker-compose.yml` (API +
+  Qdrant 1.18.0 with a volume), and a deterministic production-mode smoke stack.
+- Packaged local release smoke: authenticated search → full-text → cited synthesis,
+  required run records, structured completion log, and restart persistence all passed.
 - Fly deployment manifest: `fly.toml` with a Qdrant volume mount, readiness check, API-key/rate-limit env, and documented secret provisioning commands.
 - Docs: `README.md`, `AGENTS.md` (source of truth), `CLAUDE.md` (defers to AGENTS.md), `.env.example`.
 
@@ -109,15 +220,20 @@ Confirmed the OpenAI-compatible backend works against a local model: the agent l
 
 - Eval harness exists (`evals/run_eval.py`, benchmark fixtures) and the latest named live DeepSeek fixture report is in `evals/reports/deepseek-v4-flash-fixture.{jsonl,md}`. Decide whether to commit that named report, regenerate `latest.*`, or keep reports untracked before release.
 - `evals/run_eval.py --fixture-corpus` runs the configured live LLM against deterministic fixture papers and synthetic full text, so provider cost can be measured without external retrieval dependencies.
-- Direct uvicorn smoke testing works in local fallback mode and persistent Qdrant mode. The persistent test used a 3-paper corpus to stay light on an 8GB MacBook, verified ingest/search/brief, then restarted Qdrant and uvicorn to confirm the collection persisted.
+- Direct uvicorn smoke testing works in local fallback mode and persistent Qdrant
+  mode. The packaged production-mode path is also verified locally; only the public
+  Fly path and clean-checkout reproducibility remain open.
 - Static UI (`static/index.html`) provides an ask-first console: a single technical decision-question form, masthead health readouts, a streaming reasoning-spine timeline, telemetry gauges, evidence/diagnostics tabs, and the final memo. Manual ingest and search preview were removed from the page (the agent backfills arXiv itself); both endpoints stay available via the API. It is still a single-file prototype and should be treated as an observability surface, not a production UI.
 - arXiv date-filter failures are surfaced as JSON at the API boundary. The UI-side retry-without-date-range fallback was removed along with the ingest form, so programmatic `/ingest` callers handle this themselves. The underlying arXiv API remains flaky for some filtered queries, especially date ranges close to the current date.
 - DeepSeek V4 live behaviour is improved and revalidated; token use is now measured in the fixture report, but real-corpus costs still need a production budget.
 
 ## Not started / gaps before "deployable"
 
-- **Docker image not yet built/run** this session — compose is defined but intentionally deferred because the next local smoke target is direct uvicorn + separately started Qdrant.
-- Real agent briefs require `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`; otherwise only the fallback memo is produced.
+- The public Fly path has not been deployed or smoked from this checkout.
+- The local packaged smoke used a deterministic OpenAI-compatible provider; a release
+  smoke still needs one real provider plus Langfuse trace evidence.
+- Existing Qdrant 1.9.x data cannot be mounted directly into 1.18.0; define and test a
+  supported snapshot/export migration before upgrading an installation with data.
 
 ## How to test it
 
@@ -152,11 +268,18 @@ curl -N -X POST http://localhost:8000/briefs/stream \
   -d '{"research_question":"Should an AI team use agentic RAG for technical decision briefs?","domain":"cs.LG","max_papers":6}'
 ```
 
-Full persistent Docker stack, when needed: `cp .env.example .env && docker compose up --build`, then open `http://localhost:8000`.
+Full persistent Docker stack: `cp .env.example .env && docker compose up --build`,
+then open `http://localhost:8000`. The deterministic release-smoke stack is documented
+in `README.md` and runs on `http://127.0.0.1:8767`.
 
 ## Suggested next steps
 
-1. Commit or explicitly qualify the live DeepSeek fixture eval report, and decide whether `latest.*` should be regenerated from the named report before release.
-2. Persist run transcripts and diagnostics so brittle model behaviour can be replayed, evaluated, and compared across model/provider changes.
-3. Install Fly CLI and run the production smoke: deploy, hit `/health`, ingest a tiny corpus, stream one brief, restart the machine, and confirm Qdrant persistence plus run-record/log output.
-4. Deploy the Fly app with real secrets, ingest a seed corpus, and run an end-to-end public URL smoke test.
+1. Commit the release candidate, rebuild it from a clean checkout or CI runner, and
+   record the image digest.
+2. Install Fly CLI and run the production smoke: deploy, hit `/health`, ingest a tiny
+   corpus, stream one brief, restart the machine, and confirm Qdrant persistence plus
+   run-record/log output.
+3. Capture a real-provider Langfuse trace, measured usage/cost, JSONL record, and
+   structured completion log for the same public run.
+4. Decide whether the named DeepSeek report or regenerated `latest.*` is the release
+   evidence of record, then reconcile `README.md`, `NEXT_PHASE.md`, and report prose.

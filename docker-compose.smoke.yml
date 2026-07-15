@@ -1,0 +1,58 @@
+name: research-brief-smoke
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    volumes:
+      - smoke_qdrant_data:/qdrant/storage
+
+  mock-llm:
+    image: research-brief-agent:release-smoke
+    command: ["python", "docker/smoke_openai.py"]
+
+  api:
+    image: research-brief-agent:release-smoke
+    build: .
+    command:
+      - docker/wait-for-qdrant.sh
+      - uvicorn
+      - src.api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      APP_NAME: research-brief-agent-smoke
+      ENVIRONMENT: production
+      API_KEYS: smoke-api-key
+      API_KEY_HEADER_NAME: X-API-Key
+      RATE_LIMIT_REQUESTS: "20"
+      RATE_LIMIT_WINDOW_SECONDS: "60"
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: arxiv_papers_smoke
+      VECTOR_STORE_BACKEND: qdrant
+      LLM_PROVIDER: openai
+      OPENAI_API_KEY: smoke-provider-key
+      OPENAI_MODEL: smoke-agent
+      OPENAI_BASE_URL: http://mock-llm:8081/v1
+      QUERY_EXPANSION_ENABLED: "false"
+      SEARCH_AUTO_BACKFILL: "false"
+      FULL_TEXT_MAX_PAPERS: "1"
+      FULL_TEXT_TOTAL_PAPER_BUDGET: "1"
+      FULL_TEXT_TIMEOUT_S: "30"
+      PDF_EXTRACTOR: pypdf
+      RUN_RECORDS_DIR: /app/run-records
+      RUN_RECORDS_REQUIRED: "true"
+      STRUCTURED_LOGS: "true"
+      LOG_LEVEL: INFO
+    ports:
+      - "127.0.0.1:8767:8000"
+    volumes:
+      - smoke_run_records:/app/run-records
+    depends_on:
+      - qdrant
+      - mock-llm
+
+volumes:
+  smoke_qdrant_data:
+  smoke_run_records:
