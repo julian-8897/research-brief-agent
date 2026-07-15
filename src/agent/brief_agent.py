@@ -266,6 +266,18 @@ class ResearchBriefAgent:
         }
 
         brief = self._normalize_final_brief(final_text or "No brief was produced.")
+        brief, ungrounded_ids = toolset.filter_ungrounded_citations(brief)
+        if ungrounded_ids:
+            warning = (
+                "Removed citations to papers not retrieved this run "
+                f"(cited from model knowledge, not evidence): {', '.join(ungrounded_ids)}."
+            )
+            warnings.append(warning)
+            yield self._warning_event(
+                "ungrounded_citations_removed",
+                warning,
+                ungrounded_ids=ungrounded_ids,
+            )
         if toolset.retrieved_count < 2:
             warning = (
                 "Retrieved evidence is thin; the brief should use explicit uncertainty."
@@ -639,8 +651,19 @@ class ResearchBriefAgent:
             f"The memo must be a {request.brief_type} containing: a recommendation, "
             "key evidence, tradeoffs, baselines or alternatives to compare, "
             "implementation risks, explicit uncertainty (refuse to over-claim when "
-            "evidence is weak), and concrete next steps. Cite papers inline by arXiv "
-            "id, e.g. [2401.00001]. Only cite papers returned by the tools."
+            "evidence is weak), and concrete next steps.\n\n"
+            "Citation rules (strict):\n"
+            "- Cite papers inline by arXiv id, e.g. [2401.00001].\n"
+            "- You may ONLY cite arXiv ids that were returned to you by the tools in "
+            "this conversation. Do NOT cite papers from your own memory or training "
+            "knowledge, even canonical ones you recognize (for example the AdamW, "
+            "Transformer, or QLoRA papers). If you know a relevant paper that the "
+            "tools did not return, do not cite it; instead note the gap in the "
+            "uncertainty section.\n"
+            "- Every [id] you write must be an exact id the tools surfaced. Citations "
+            "to unretrieved papers are removed from the final memo, so an ungrounded "
+            "citation just deletes your support. If the retrieved evidence is thin, "
+            "say so explicitly rather than padding with remembered references."
         )
 
     def _user_prompt(self, request: BriefRequest) -> str:

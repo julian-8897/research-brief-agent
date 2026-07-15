@@ -24,6 +24,14 @@ _MIN_FETCH_RESULTS = 1
 _MAX_FETCH_RESULTS = 50
 _ARXIV_VERSION_SUFFIX = re.compile(r"v\d+$")
 
+# Inline citation markers, matching the eval metric's notion of a citation: a
+# bracket whose entire content is an arXiv id (modern 2401.00001[v2] or legacy
+# hep-th/9901001). Used to strip ungrounded citations the model produces from
+# memory rather than from retrieved evidence.
+_INLINE_CITATION_RE = re.compile(
+    r"\[(\d{4}\.\d{4,5}(?:v\d+)?|[a-z][a-z\-]+(?:\.[A-Z]{2})?/\d{7})\]"
+)
+
 
 def _build_search_embedding_text(
     research_question: str, query: str, constraints: list[str] | None = None
@@ -579,6 +587,41 @@ class ResearchToolset:
             )
             for item in chosen
         ]
+
+    def filter_ungrounded_citations(self, brief_text: str) -> tuple[str, list[str]]:
+        """Strip inline citations to ids not retrieved this run.
+
+        The agent's contract is to cite only arXiv evidence it actually
+        retrieved. A capable model will otherwise cite famous papers from
+        memory (e.g. the AdamW or Transformer papers) that were never fetched
+        or read. This is the deterministic safety net behind the prompt: every
+        ``[id]`` marker whose id does not resolve to a retrieved paper is
+        removed, and the removed ids are returned so the caller can surface a
+        warning. Non-citation brackets (``[Table 2]``) and grounded citations
+        are left untouched.
+        """
+        ungrounded: list[str] = []
+
+        def _replace(match: re.Match[str]) -> str:
+            cid = match.group(1)
+            if self._resolve_paper_id(cid) is not None:
+                return match.group(0)
+            ungrounded.append(cid)
+            return ""
+
+        cleaned = _INLINE_CITATION_RE.sub(_replace, brief_text)
+        # Tidy whitespace and dangling punctuation left where a citation was
+        # removed (e.g. "as shown  ." -> "as shown.").
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"[ \t]+([.,;:!?])", r"\1", cleaned)
+
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for cid in ungrounded:
+            if cid not in seen:
+                seen.add(cid)
+                ordered.append(cid)
+        return cleaned, ordered
 
     def diagnostics(self) -> RetrievalDiagnostics:
         scores = [item.score for item in self._retrieved.values()]

@@ -2,7 +2,43 @@
 
 Living status tracker for Research Brief Agent. Update this as work lands.
 
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-15_
+
+## Current review (2026-07-15)
+
+- **Deployment posture reframed.** The Fly smoke was demoted from a P0 release gate
+  to an optional P2 portfolio affordance. The Docker Compose smoke already proves
+  every architecturally risky surface; a Fly deploy reruns the same container and
+  validates nothing new, while a public LLM agent endpoint is a standing cost/abuse
+  liability. The release artifact of record is the local live-provider evidence below.
+- **Live release-evidence capture surfaced a real source-grounding gap — now fixed.**
+  Running the fixture-corpus eval on live DeepSeek at the full 7-core-case scale (not
+  the earlier 3-case sample) exposed that a capable model cites famous papers from
+  parametric memory (AdamW, GPTQ, QLoRA, even the Transformer paper) that were never
+  retrieved or read. Grounding dropped to 74% with a 26% "hallucination" rate. These
+  were real papers, not fabricated ids, but citing unretrieved sources violates the
+  product's core contract, so it blocked the evidence freeze. Note: the earlier
+  "3/3 ok, 100% grounding" claim did not generalize past 3 cases.
+- **Strict-grounding enforcement landed** (two layers): the system prompt now forbids
+  citing any paper the tools did not return, naming the memory-citation failure mode
+  explicitly; and `ResearchToolset.filter_ungrounded_citations` deterministically
+  strips any inline `[id]` that does not resolve to a retrieved paper, emitting an
+  `ungrounded_citations_removed` warning. New tests cover both the end-to-end strip +
+  warning and the filter's version-tolerance / non-citation-bracket handling.
+- **Verified on the live path:** re-running the 7-core-case fixture eval on
+  `deepseek-v4-flash` (documented default config: `AGENT_MAX_ITERATIONS=8`,
+  `AGENT_MAX_SEARCH_CALLS=3`, 3-paper full-text budget) now returns **7/7 `ok`, 0%
+  hallucination, 100% citation grounding, 100% full-text success, no fallbacks or
+  warnings**. The prompt change alone eliminated memory citations this run; the filter
+  is the tested safety net. Report saved to `evals/reports/latest.{jsonl,md}`.
+  Measured tokens are the hard evidence; the per-case dollar figure is a configured
+  estimate at default rates, not DeepSeek's real (much lower) pricing.
+- **Config drift found:** the local `.env` had drifted to `deepseek-chat` with
+  `AGENT_MAX_ITERATIONS=6`, which under-provisions the loop and produced 4/7 canned
+  fallbacks. The documented default in `.env.example` (`deepseek-v4-flash`, iters 8)
+  is the validated config; the eval above uses it via explicit env overrides.
+- **Verification:** `uv run pytest -q` passes with **114 tests**; `uv run ruff check .`
+  is clean.
 
 ## Current review (2026-07-13)
 
@@ -39,7 +75,9 @@ _Last updated: 2026-07-13_
 ## Current implementation checklist
 
 This is the active, ordered checklist. Update it in the same change that completes an
-item. **Active next: public Fly smoke and release evidence freeze.**
+item. **Active next: capture the local live-provider release evidence and freeze it as
+the artifact of record.** A hosted (Fly) demo is now an optional portfolio affordance,
+not a release gate — see the rationale in "Deployment posture" below.
 
 ### P0 — Evaluation integrity
 
@@ -59,7 +97,18 @@ item. **Active next: public Fly smoke and release evidence freeze.**
 - [x] Confirm JSONL run records and structured summary logs for the same run.
 - [x] Restart the stack and verify Qdrant corpus persistence.
 - [ ] Rebuild the committed release candidate from a clean checkout or CI runner.
-- [ ] Repeat the critical path on Fly and record the public health/brief evidence.
+
+### Deployment posture (2026-07-15)
+
+The Docker Compose smoke already proves everything architecturally risky: the
+multi-tool agent loop, API-key auth, per-IP limiting, Qdrant persistence across
+restart, run-record IO, and the CPU-only image booting. A Fly deployment reruns the
+same container against a different scheduler and validates nothing new about the
+system, so it is **no longer a P0 release gate**. Its only distinct value is a
+click-through demo URL, which for this app is an ongoing cost/abuse liability (a public
+LLM agent spends real tokens per request). It is therefore demoted to an optional P2
+portfolio affordance; the release artifact of record is the local live-provider
+evidence below, which is more informative and free of a standing public endpoint.
 
 ### Packaged smoke evidence (2026-07-13)
 
@@ -85,14 +134,17 @@ item. **Active next: public Fly smoke and release evidence freeze.**
   offline core quality gate passed with rank-one relevant hits, 100% citation-ID
   grounding, no hallucinated ids, and no warnings.
 
-### P1 — Release evidence of record
+### P1 — Release evidence of record (active next)
 
-- [ ] Decide whether the named DeepSeek report or a regenerated `latest.*` is the
-  release-facing live-provider artifact.
-- [ ] Refresh `README.md`, `NEXT_PHASE.md`, and stale report prose from one verified
-  snapshot.
-- [ ] Capture Langfuse trace coverage, measured tokens, cost, and run-record ids for a
-  single live release-smoke run.
+- [x] Capture one live-provider run against the fixture corpus (DeepSeek) with measured
+  tokens, estimated cost, latency, and quality metrics; save it as the release-facing
+  `latest.{jsonl,md}` artifact. Done 2026-07-15: 7/7 `ok`, 0% hallucination, 100%
+  grounding on `deepseek-v4-flash` after the strict-grounding fix.
+- [ ] Refresh `README.md`, `NEXT_PHASE.md`, and stale report prose from that one
+  verified snapshot.
+- [ ] (Optional) Add Langfuse keys and capture a trace + run-record ids for the same
+  run. Deferred: no Langfuse project is configured, so the tracer no-ops; measured
+  usage/cost/latency and the JSONL run record already stand as evidence without it.
 
 ### P1 — Runtime support contract
 
@@ -108,6 +160,12 @@ item. **Active next: public Fly smoke and release evidence freeze.**
 
 - [ ] Move the Dockerfile's `README.md` copy after the dependency/model bake so a
   documentation-only change does not invalidate the expensive SPECTER2 cache layer.
+
+### P2 — Optional hosted demo (was P0 Fly smoke)
+
+- [ ] If a click-through demo URL is wanted, deploy the existing `fly.toml` (or a
+  scale-to-zero host), keep the API-key + per-IP limiter on, and add a provider spend
+  cap. Treat it as a demo affordance, not a reliability gate.
 
 ## Status at a glance
 

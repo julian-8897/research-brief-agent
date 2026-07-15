@@ -1,6 +1,7 @@
 import numpy as np
 
 from src.agent import ResearchBriefAgent, ResearchTools
+from src.agent.toolset import ResearchToolset
 from src.llm import ToolCall, ToolResultsMessage, TurnResult
 from src.models import BriefRequest, PaperRecord
 from src.observability import Tracer
@@ -485,6 +486,122 @@ def test_agent_compacts_older_full_text_tool_results(monkeypatch):
     assert '"full_text":' not in later_full_text
     assert '"full_text_excerpt":' in later_full_text
     assert len(later_full_text) < len(immediate_full_text)
+
+
+def test_agent_strips_ungrounded_citations(monkeypatch):
+    # A capable model may cite famous papers from memory that were never
+    # retrieved. The agent must remove those and keep only grounded citations.
+    monkeypatch.setattr(
+        "src.agent.toolset.fetch_arxiv_fulltext",
+        lambda pdf_url, *, timeout, char_budget, **kwargs: ("FULL BODY TEXT", False),
+    )
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        anthropic_api_key=None,
+        openai_api_key=None,
+    )
+    tools = ResearchTools(
+        settings, FakeArxivClient(), FakeEmbedder(), _store_with_paper()
+    )
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="s",
+                        name="search_papers",
+                        arguments={"query": "retrieval grounding", "k": 1},
+                    )
+                ],
+            },
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="f",
+                        name="get_full_text",
+                        arguments={"paper_ids": ["2401.00001"]},
+                    )
+                ],
+            },
+            {
+                "text": (
+                    "# Decision Memo\n\n"
+                    "Adopt the retrieved approach [2401.00001]. This builds on the "
+                    "Transformer [1706.03762] and AdamW [1711.05101] papers."
+                ),
+            },
+        ]
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    events = list(
+        agent._iterate(
+            BriefRequest(
+                research_question="How should retrieval systems support briefs?",
+                max_papers=1,
+            )
+        )
+    )
+    final = events[-1]["data"]
+
+    # Grounded citation survives; the two memory citations are removed.
+    assert "[2401.00001]" in final["final_brief"]
+    assert "[1706.03762]" not in final["final_brief"]
+    assert "[1711.05101]" not in final["final_brief"]
+    # cited_papers never contains the ungrounded ids.
+    assert {p["id"] for p in final["cited_papers"]} == {"2401.00001"}
+    # The removal is surfaced as a visible warning event and in the response.
+    warning_event = next(
+        event
+        for event in events
+        if event["event"] == "warning"
+        and event["code"] == "ungrounded_citations_removed"
+    )
+    assert set(warning_event["ungrounded_ids"]) == {"1706.03762", "1711.05101"}
+    assert any("not retrieved this run" in warning for warning in final["warnings"])
+
+
+def test_filter_ungrounded_citations_keeps_grounded_and_version_variants():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        anthropic_api_key=None,
+        openai_api_key=None,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    store.upsert(
+        [
+            PaperRecord(
+                id="1705.08292v2",
+                title="Marginal Value of Adaptive Gradient Methods",
+                summary="Retrieval-style analysis of Adam vs SGD generalization.",
+                arxiv_url="https://arxiv.org/abs/1705.08292",
+            )
+        ],
+        np.array([[1.0, 0.0]]),
+    )
+    tools = ResearchTools(settings, FakeArxivClient(), FakeEmbedder(), store)
+    toolset = ResearchToolset(
+        tools, BriefRequest(research_question="Adam vs SGD?", max_papers=1)
+    )
+    toolset.call(
+        ToolCall(id="s", name="search_papers", arguments={"query": "retrieval", "k": 1})
+    )
+
+    brief = (
+        "SGD generalizes better [1705.08292] than adaptive methods. "
+        "See also LAMB [1904.00962] and Table [2]. Not a cite [foo]."
+    )
+    cleaned, ungrounded = toolset.filter_ungrounded_citations(brief)
+
+    # Grounded id kept even though it was cited without the version suffix.
+    assert "[1705.08292]" in cleaned
+    # Unretrieved id removed; non-citation brackets left untouched.
+    assert "[1904.00962]" not in cleaned
+    assert "[2]" in cleaned
+    assert "[foo]" in cleaned
+    assert ungrounded == ["1904.00962"]
 
 
 def _tool_result_content(messages, tool_call_id: str) -> str:
