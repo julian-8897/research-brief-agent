@@ -2,7 +2,7 @@
 
 A source-grounded briefing service for AI/ML and scientific-ML engineers and researchers making evidence-backed engineering decisions: method selection, architecture tradeoffs, technique adoption, and deployment/uncertainty risk. A user submits a research decision question; the service retrieves relevant papers, reads the full text of promising arXiv candidates when available, and streams back a cited memo covering recommendation, evidence, tradeoffs, risks, uncertainty, next steps, latency, and measured cost. The output is the memo, not a chat answer or a ranked list of links.
 
-The evidence backend is scholarly literature: persistent Qdrant retrieval with SPECTER embeddings, plus on-demand arXiv backfill when the corpus is thin. Full-text PDFs are read in-process, and the agent blocks the final memo until that evidence has been read, or records a degraded run if it cannot. Each run reports latency, token usage, and cost taken from the provider response, every turn and tool call is traced to Langfuse, and the streaming API writes JSONL run records plus structured request/run logs.
+The evidence backend is scholarly literature: persistent Qdrant retrieval with SPECTER embeddings, plus on-demand arXiv backfill when the corpus is thin. Full-text PDFs are read in-process, and the agent blocks the final memo until that evidence has been read, or records a degraded run if it cannot. Citations are grounded to evidence the run actually retrieved: the model is instructed to cite only retrieved papers, and a deterministic post-filter strips any inline citation to a paper that was not retrieved (and warns), so a capable model cannot pad the memo with famous references it recalls from training. Each run reports latency, token usage, and cost taken from the provider response, every turn and tool call is traced to Langfuse, and the streaming API writes JSONL run records plus structured request/run logs.
 
 Synthesis runs against Anthropic (native Claude) or any OpenAI Chat Completions-compatible endpoint (OpenAI, local models, OpenRouter, codex/opencode-style gateways). The agent loop hands the model a catalogue of evidence tools (semantic search, arXiv backfill, abstract-level detail, full-text reading) and lets it choose which to call and in what order; turn, discovery, and tool-call budgets (`AGENT_MAX_ITERATIONS`, `AGENT_MAX_SEARCH_CALLS`, `AGENT_MAX_TOOL_CALLS`) bound latency and cost. The same tool-use layer drives both backends.
 
@@ -156,7 +156,13 @@ Environment variables are documented in [.env.example](.env.example). Key settin
 - `DEFAULT_MAX_PAPERS`, `MAX_INGEST_RESULTS`, `MAX_RETRIEVAL_RESULTS`, `RETRIEVAL_MIN_SCORE`
 - `QUERY_EXPANSION_ENABLED`, `SEARCH_AUTO_BACKFILL=false`, `SEARCH_BACKFILL_QUERY_EXPANSION`, `RERANK_ENABLED=false`, `RERANK_MODEL`, `RERANK_CANDIDATE_K`
 
-## Fly Deployment
+## Fly Deployment (optional hosted demo)
+
+A hosted deploy is optional, not a correctness gate: the Docker Compose smoke stack
+already exercises every risky path (auth, rate limiting, Qdrant persistence across
+restart, run records, the CPU-only image booting), and a public LLM agent endpoint
+spends real tokens per request, so keep the API-key auth and a provider spend cap on
+if you expose one. Use this when you specifically want a click-through URL.
 
 `fly.toml` runs the real agent loop behind `X-API-Key`, starts Qdrant on the same Fly machine, and mounts `/qdrant/storage` for persistence. The Docker image bakes the SPECTER2 base model and adapters during build so the first request avoids the model download.
 
@@ -241,10 +247,16 @@ uv run ruff format .
 uv run uvicorn src.api.main:app --reload
 ```
 
+Supported Python is 3.11–3.13 (`requires-python = ">=3.11,<3.14"`); CI tests all
+three in a matrix and the Docker image pins 3.12. The upper bound is deliberate:
+an open-ended range let `uv` select an untested newer interpreter and break test
+collection.
+
 Current verification:
 
 ```text
-112 passed, 1 warning; ruff clean; 7-case offline core quality gate passing
+114 passed, 1 warning on Python 3.11, 3.12, and 3.13; ruff clean;
+7-case offline core quality gate passing
 ```
 
 ## Project Structure

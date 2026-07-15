@@ -1,22 +1,29 @@
 # Next Phase: Research Brief Agent Demo
 
+> **Superseded (2026-07-15) — kept as a historical planning record.**
+> Most of this plan has shipped. Two premises here are now out of date, so read
+> [PROGRESS.md](PROGRESS.md) as the live source of truth, not this file:
+> 1. **The Fly deploy is no longer the headline / CV-gating item.** The Docker
+>    Compose smoke proves every architecturally risky path, so a hosted deploy was
+>    reframed from a P0 gate to an optional demo affordance. The release artifact of
+>    record is the local live-provider eval, not a public URL. See the "Deployment
+>    posture" note in PROGRESS.md.
+> 2. **Status numbers below are stale** (they read "51 tests" / "3/3 fixture cases").
+>    Current: 114 tests pass on Python 3.11–3.13; the live fixture eval runs 7 core
+>    cases at 0% hallucination and 100% citation grounding after strict-grounding
+>    enforcement landed.
+>
+> The tier structure below records the reasoning at the time and which items were
+> delivered; it is no longer the forward plan.
+
 Planned work for the next phase, framed around a single goal: make this project read as
 a production-grade research briefing system for AI/ML and scientific-ML engineering
-decisions. A live, verifiable URL plus the
-engineering that makes a public deploy responsible is worth more than any additional
-feature.
+decisions.
 
-Status when written: core works locally, tests pass (51), CI runs ruff + pytest, **not yet
-deployed**. See [PROGRESS.md](PROGRESS.md) for full current state.
-
-Current status: Tier 1 implementation is present in this checkout but not deployed from
-it yet. Direct uvicorn smoke testing works in local fallback mode and persistent Qdrant mode;
-a 3-paper Qdrant ingest/search/brief survived a Qdrant+uvicorn restart. The live DeepSeek
-`deepseek-v4-flash` fixture eval now passes 3/3 cases with real memo output, no warnings,
-no deterministic fallback, and full-text success for every attempted paper.
-
-Organizing principle: a recruiter can verify a live URL in 15 seconds; an interviewer will
-drill into how it's deployed, secured, and operated. Optimize for that.
+Original organizing principle: a recruiter can verify a live URL in 15 seconds; an
+interviewer will drill into how it's deployed, secured, and operated. That framing has
+since been tempered — a verifiable, well-tested system with measured evidence carries the
+same signal without a standing public LLM endpoint to babysit.
 
 ---
 

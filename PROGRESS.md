@@ -145,8 +145,10 @@ evidence below, which is more informative and free of a standing public endpoint
   tokens, estimated cost, latency, and quality metrics; save it as the release-facing
   `latest.{jsonl,md}` artifact. Done 2026-07-15: 7/7 `ok`, 0% hallucination, 100%
   grounding on `deepseek-v4-flash` after the strict-grounding fix.
-- [ ] Refresh `README.md`, `NEXT_PHASE.md`, and stale report prose from that one
-  verified snapshot.
+- [x] Refresh `README.md`, `NEXT_PHASE.md`, and stale report prose from that one
+  verified snapshot. Done 2026-07-15: README now states 114 tests on Python
+  3.11–3.13, documents strict citation grounding, and reframes Fly as an optional
+  demo; NEXT_PHASE.md carries a superseded banner pointing here.
 - [ ] (Optional) Add Langfuse keys and capture a trace + run-record ids for the same
   run. Deferred: no Langfuse project is configured, so the tracer no-ops; measured
   usage/cost/latency and the JSONL run record already stand as evidence without it.
