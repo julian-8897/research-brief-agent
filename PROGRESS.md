@@ -37,8 +37,13 @@ _Last updated: 2026-07-15_
   `AGENT_MAX_ITERATIONS=6`, which under-provisions the loop and produced 4/7 canned
   fallbacks. The documented default in `.env.example` (`deepseek-v4-flash`, iters 8)
   is the validated config; the eval above uses it via explicit env overrides.
-- **Verification:** `uv run pytest -q` passes with **114 tests**; `uv run ruff check .`
-  is clean.
+- **Runtime support contract closed.** `requires-python` is now bounded to
+  `>=3.11,<3.14` (the open-ended `>=3.10` let `uv` pick the system Python 3.14 and
+  break test collection); the lock was regenerated. CI runs a 3.11/3.12/3.13 matrix,
+  the classifiers and AGENTS.md document the same range, and all three were verified
+  locally at 114 passing tests. Docker stays pinned to 3.12.
+- **Verification:** `uv run pytest -q` passes with **114 tests** on 3.11, 3.12, and
+  3.13; `uv run ruff check .` is clean.
 
 ## Current review (2026-07-13)
 
@@ -148,8 +153,11 @@ evidence below, which is more informative and free of a standing public endpoint
 
 ### P1 — Runtime support contract
 
-- [ ] Pin the contributor Python runtime or bound `requires-python`.
-- [ ] Test the supported Python versions in CI and document the matrix.
+- [x] Bound `requires-python` to `>=3.11,<3.14` (the open-ended `>=3.10` let `uv`
+  select the system Python 3.14 and break test collection); relocked. Done 2026-07-15.
+- [x] Test the supported Python versions (3.11, 3.12, 3.13) in a CI matrix and document
+  the matrix in AGENTS.md. Verified locally: 114 tests pass on all three. Done
+  2026-07-15.
 
 ### P2 — Operator experience
 
