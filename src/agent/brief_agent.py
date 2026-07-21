@@ -4,7 +4,11 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 from src.agent.tools import ResearchTools
-from src.agent.toolset import ResearchToolset, _build_search_embedding_text
+from src.agent.toolset import (
+    ResearchToolset,
+    _build_search_embedding_text,
+    linkify_inline_citations,
+)
 from src.llm import (
     AssistantMessage,
     LLMProvider,
@@ -267,6 +271,7 @@ class ResearchBriefAgent:
 
         brief = self._normalize_final_brief(final_text or "No brief was produced.")
         brief, ungrounded_ids = toolset.filter_ungrounded_citations(brief)
+        brief = toolset.linkify_citations(brief)
         if ungrounded_ids:
             warning = (
                 "Removed citations to papers not retrieved this run "
@@ -742,6 +747,15 @@ class ResearchBriefAgent:
         usage.estimated_cost_usd = _estimate_cost(
             self.settings, usage.input_tokens, usage.output_tokens
         )
+        url_by_id = {
+            item.paper.id: (
+                str(item.paper.arxiv_url)
+                if item.paper.arxiv_url
+                else f"https://arxiv.org/abs/{item.paper.id}"
+            )
+            for item in retrieval.items
+        }
+        brief = linkify_inline_citations(brief, url_by_id.get)
         response = BriefResponse(
             final_brief=brief,
             cited_papers=[

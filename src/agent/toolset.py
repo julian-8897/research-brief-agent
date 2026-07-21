@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
-from src.agent.tools import ResearchTools
+from src.agent.query_expansion import expand_arxiv_query
+from src.agent.tools import ResearchTools, RetrievalResult
 from src.ingestion import FullTextFetchError, fetch_arxiv_fulltext
 from src.llm import ToolCall, ToolSpec
 from src.models import (
@@ -31,6 +33,27 @@ _ARXIV_VERSION_SUFFIX = re.compile(r"v\d+$")
 _INLINE_CITATION_RE = re.compile(
     r"\[(\d{4}\.\d{4,5}(?:v\d+)?|[a-z][a-z\-]+(?:\.[A-Z]{2})?/\d{7})\]"
 )
+
+
+def linkify_inline_citations(text: str, url_for: Callable[[str], str | None]) -> str:
+    """Rewrite inline ``[id]`` citations into markdown links ``[id](url)``.
+
+    ``url_for`` maps a cited arXiv id to its URL, or ``None`` to leave the
+    citation as plain text. A bracket already followed by a ``(`` link target is
+    left untouched so an already-linked citation is not double-wrapped, and
+    non-citation brackets (``[Table 2]``) never match the citation pattern.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        if text[match.end() : match.end() + 1] == "(":
+            return match.group(0)
+        cid = match.group(1)
+        url = url_for(cid)
+        if not url:
+            return match.group(0)
+        return f"[{cid}]({url})"
+
+    return _INLINE_CITATION_RE.sub(_replace, text)
 
 
 def _build_search_embedding_text(
@@ -72,6 +95,9 @@ class ResearchToolset:
         self._request = request
         self._retrieved: dict[str, SearchResponseItem] = {}
         self._ingested_ids: set[str] = set()
+        # Search queries already auto-backfilled this run, so a repeated search
+        # for the same topic does not re-hit arXiv.
+        self._backfilled_queries: set[str] = set()
         self._search_latency_ms = 0.0
         self._max_requested_k = 0
         # Full-text bodies fetched this run, cached by id so a repeated request
@@ -323,6 +349,12 @@ class ResearchToolset:
         )
         result = self._tools.vector_retrieve(query, k, embed_text=embed_text)
         self._search_latency_ms += result.diagnostics.retrieval_latency_ms
+        backfilled = 0
+        if self._should_backfill(query, result):
+            backfilled = self._backfill_for_query(query)
+            if backfilled:
+                result = self._tools.vector_retrieve(query, k, embed_text=embed_text)
+                self._search_latency_ms += result.diagnostics.retrieval_latency_ms
         self._max_requested_k = max(self._max_requested_k, k)
         for item in result.items:
             self._retrieved[item.paper.id] = item
@@ -335,23 +367,64 @@ class ResearchToolset:
             }
             for item in result.items
         ]
-        content = json.dumps(
-            {"query": query, "returned": len(papers), "papers": papers}
-        )
+        body: dict[str, Any] = {
+            "query": query,
+            "returned": len(papers),
+            "papers": papers,
+        }
+        if backfilled:
+            body["backfilled"] = backfilled
         if not papers:
-            content = json.dumps(
-                {
-                    "query": query,
-                    "returned": 0,
-                    "papers": [],
-                    "hint": (
-                        "No indexed papers cleared the relevance threshold. "
-                        "Call fetch_arxiv with a descriptive arXiv query, then "
-                        "run search_papers once again."
-                    ),
-                }
+            body["hint"] = (
+                "No indexed papers cleared the relevance threshold. "
+                "Call fetch_arxiv with a descriptive arXiv query, then "
+                "run search_papers once again."
             )
-        return content, {"returned": len(papers)}
+        meta: dict[str, Any] = {"returned": len(papers)}
+        if backfilled:
+            meta["backfilled"] = backfilled
+        return json.dumps(body), meta
+
+    def _should_backfill(self, query: str, result: RetrievalResult) -> bool:
+        """Auto-backfill when the local corpus does not cover this query well.
+
+        Triggers when there is no local paper at or above the relevance floor
+        (empty result set, or best score below it), the behavior is enabled, and
+        this query has not already been backfilled this run. This is what makes
+        cold-start questions work: the model no longer has to notice thin results
+        and choose ``fetch_arxiv`` itself.
+        """
+        settings = self._tools.settings
+        if not settings.agent_search_auto_backfill:
+            return False
+        if query.casefold() in self._backfilled_queries:
+            return False
+        best = result.items[0].score if result.items else None
+        return best is None or best < settings.agent_search_backfill_min_score
+
+    def _backfill_for_query(self, query: str) -> int:
+        """Fetch fresh arXiv papers for ``query`` and index them. Returns new count.
+
+        arXiv access is best-effort: the API is flaky, so a fetch failure leaves
+        the run on the existing corpus rather than surfacing as a tool error.
+        """
+        settings = self._tools.settings
+        self._backfilled_queries.add(query.casefold())
+        arxiv_query, _expanded = expand_arxiv_query(
+            query,
+            self._tools.llm if settings.search_backfill_query_expansion else None,
+            enabled=settings.search_backfill_query_expansion,
+            max_words=settings.query_expansion_max_words,
+        )
+        try:
+            new_count, _papers = self._tools.fetch_and_ingest(
+                arxiv_query,
+                settings.search_backfill_max_papers,
+                date_range=self._request.date_range,
+            )
+        except Exception:
+            return 0
+        return new_count
 
     def _fetch_arxiv(self, query: str, max_results: int) -> tuple[str, dict[str, Any]]:
         if not query:
@@ -622,6 +695,26 @@ class ResearchToolset:
                 seen.add(cid)
                 ordered.append(cid)
         return cleaned, ordered
+
+    def linkify_citations(self, brief_text: str) -> str:
+        """Turn grounded inline ``[id]`` citations into clickable arXiv links.
+
+        Runs after :meth:`filter_ungrounded_citations`, so every remaining
+        ``[id]`` resolves to a retrieved paper. Each becomes ``[id](arxiv_url)``
+        using that paper's canonical URL (or the standard abstract URL), which
+        clients render as a link to the source.
+        """
+
+        def url_for(cid: str) -> str | None:
+            resolved = self._resolve_paper_id(cid)
+            if resolved is None:
+                return None
+            item = self._retrieved.get(resolved)
+            if item and item.paper.arxiv_url:
+                return str(item.paper.arxiv_url)
+            return f"https://arxiv.org/abs/{resolved}"
+
+        return linkify_inline_citations(brief_text, url_for)
 
     def diagnostics(self) -> RetrievalDiagnostics:
         scores = [item.score for item in self._retrieved.values()]

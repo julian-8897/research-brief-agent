@@ -1,7 +1,7 @@
 import numpy as np
 
 from src.agent import ResearchBriefAgent, ResearchTools
-from src.agent.toolset import ResearchToolset
+from src.agent.toolset import ResearchToolset, linkify_inline_citations
 from src.llm import ToolCall, ToolResultsMessage, TurnResult
 from src.models import BriefRequest, PaperRecord
 from src.observability import Tracer
@@ -602,6 +602,58 @@ def test_filter_ungrounded_citations_keeps_grounded_and_version_variants():
     assert "[2]" in cleaned
     assert "[foo]" in cleaned
     assert ungrounded == ["1904.00962"]
+
+
+def test_linkify_citations_links_grounded_ids_with_version_tolerance():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        anthropic_api_key=None,
+        openai_api_key=None,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    store.upsert(
+        [
+            PaperRecord(
+                id="1705.08292v2",
+                title="Adam vs SGD",
+                summary="retrieval analysis of adaptive methods",
+                arxiv_url="https://arxiv.org/abs/1705.08292",
+            )
+        ],
+        np.array([[1.0, 0.0]]),
+    )
+    tools = ResearchTools(settings, FakeArxivClient(), FakeEmbedder(), store)
+    toolset = ResearchToolset(
+        tools, BriefRequest(research_question="Adam vs SGD?", max_papers=1)
+    )
+    toolset.call(
+        ToolCall(id="s", name="search_papers", arguments={"query": "retrieval", "k": 1})
+    )
+
+    # Cited without the version suffix; still resolves to the retrieved paper.
+    brief = "SGD wins [1705.08292]. See Table [2] and note [foo]."
+    linked = toolset.linkify_citations(brief)
+
+    assert "[1705.08292](https://arxiv.org/abs/1705.08292)" in linked
+    assert "[2]" in linked
+    assert "[foo]" in linked
+
+
+def test_linkify_inline_citations_helper_skips_unknown_and_prelinked():
+    brief = (
+        "Known [2501.00001], unknown [2409.09999], "
+        "already [2501.00001](https://arxiv.org/abs/2501.00001)."
+    )
+    urls = {"2501.00001": "https://arxiv.org/abs/2501.00001"}
+
+    out = linkify_inline_citations(brief, urls.get)
+
+    # The bare citation is linked; the pre-linked one is not double-wrapped.
+    assert out.count("[2501.00001](https://arxiv.org/abs/2501.00001)") == 2
+    # An id with no known URL is left as plain text.
+    assert "[2409.09999]" in out
+    assert "[2409.09999](" not in out
 
 
 def _tool_result_content(messages, tool_call_id: str) -> str:

@@ -2,7 +2,143 @@
 
 Living status tracker for Research Brief Agent. Update this as work lands.
 
-_Last updated: 2026-07-15_
+_Last updated: 2026-07-21_
+
+## Live product review (2026-07-21) — retrieval usefulness gap
+
+First real hands-on browser test of the end-to-end product on live
+`deepseek-v4-flash` with the in-memory store. **The plumbing is robust; retrieval
+relevance on a cold corpus is not, and that is what makes the product feel
+un-useful today.** Findings, with run evidence:
+
+- **The pipeline works end-to-end.** Question "What quantization method (GPTQ, AWQ,
+  QLoRA) best preserves accuracy for on-device LLM serving?" (max_papers 20, run
+  `ae848de7b12141a095c988b48c2b295e`) completed cleanly: 9 LLM turns, 14 tool calls,
+  3/3 full-text PDFs read, 5 citations, `status=completed`, ~39s, ~$0.33 estimated.
+  A well-structured memo was produced and returned in `final.data.final_brief`.
+- **But the memo was an honest refusal, not an answer.** It opened with "No
+  recommendation can be made from the retrieved evidence" — because all five cited
+  papers were about Retrieval-Augmented Generation, not quantization. The
+  strict-grounding contract behaved correctly (it refused rather than bluffing from
+  parametric memory); the problem is upstream in what was retrieved.
+- **Root cause: cold, topically-wrong corpus + wrong-tool bias.**
+  1. The in-memory store held 25 papers, all RAG-related, left over from an earlier
+     query in the same process; it contained **zero** quantization papers.
+  2. `search_papers` only queries the local store — it does **not** backfill from
+     arXiv. Only the separate `fetch_arxiv` tool does.
+  3. The model called `search_papers` 12+ times (many redundant) and **never once
+     called `fetch_arxiv`**, so it never pulled quantization papers from arXiv, then
+     exhausted the tool-call budget.
+  4. The off-topic RAG papers scored ~0.71–0.73, clearing `RETRIEVAL_MIN_SCORE`, so
+     nothing flagged them as irrelevant.
+  - A second run (`f5126853764f4fedb517ffdbac088823`) shows the same failure mode
+    from the empty side: `retrieved=0`, `thin_evidence`, `iteration_budget_reached`,
+    ~102s, `cited_papers=0`.
+- **Suspected embedding bug (unverified).** Every query embed logs
+  `Could not identify valid prediction head(s) from setup 'Stack[adhoc_query]'`. This
+  may mean the SPECTER2 adhoc-query adapter is **not actually activating** on the
+  query side, which would degrade all retrieval relevance and could be contributing
+  to the mediocre ~0.71 scores. Needs direct verification (confirm the adapter is
+  applied and the query embedding differs from the base-adapter embedding).
+- **Minor UX fix landed (uncommitted).** The console's "Domain" field defaulted to
+  `cs.LG`, which read as a required arXiv-category picker; in the live agent path
+  `domain` is only injected into the prompt as free text (the category-filter code
+  path, `ResearchTools.arxiv_metadata_search`, has no live callers). Changed
+  `static/index.html` to an optional field with a plain-English placeholder. Markup
+  only; backend untouched.
+
+### P0 retrieval usefulness — A + B landed 2026-07-21
+
+- [x] **A. Auto-backfill in the agent's `search_papers`.** `ResearchToolset` now
+  backfills from arXiv when a `search_papers` call finds no local paper at/above
+  `AGENT_SEARCH_BACKFILL_MIN_SCORE` (empty or weak result), indexes the fetched
+  papers, and re-runs the search once. Deduped per query per run; master toggle
+  `AGENT_SEARCH_AUTO_BACKFILL` (default true) + the score floor
+  (`AGENT_SEARCH_BACKFILL_MIN_SCORE`, default 0.75) in `Settings`. Five focused
+  tests in `tests/test_retrieval_quality.py` cover empty-corpus backfill, the
+  strong-hit skip, the off-topic-hit trigger, the toggle, and per-query dedup.
+  Hermetic: every test/eval path injects a non-network arXiv client, and the
+  backfill fetch is wrapped so arXiv flakiness never surfaces as a tool error.
+- [x] **B. Warm standing corpus seeded and wired.** Ran `scripts/seed_corpus.py`
+  into embedded on-disk Qdrant: **320 papers across all 16 benchmark topics**
+  (incl. 20 quantization papers), 3.1 MB at `.local/qdrant-corpus`. Verified the
+  quantization query now returns 5/6 on-topic quantization papers at the top
+  (previously zero). **Fixed a real persistence bug found while doing this:** the
+  seeder set `QDRANT_PATH` but not `VECTOR_STORE_BACKEND`, so a local `.env` with
+  `VECTOR_STORE_BACKEND=memory` was loaded and the 320 papers went into an
+  in-memory store discarded at exit (disk stayed empty). The seeder now pins the
+  backend and calls a new `PaperVectorStore.close()` so embedded Qdrant actually
+  flushes to disk (it persists on close, not on interpreter-exit finalization).
+  Point the app at the corpus with `QDRANT_PATH=.local/qdrant-corpus
+  VECTOR_STORE_BACKEND=qdrant`; the live dashboard is currently running against it
+  (`/health`: backend=qdrant, papers_indexed=320, fallback=false).
+
+**Verification:** `uv run pytest -q` → 145 passed (was 140; +5 backfill tests);
+`ruff check` and `ruff format --check` clean.
+
+### Still open — retrieval
+
+- [ ] **C. Prompt/budget tuning** so the model reaches for `fetch_arxiv` early and
+  stops spamming redundant `search_papers`. Band-aid on top of A; lower priority now
+  that A+B are in.
+- [ ] **Verify/fix the SPECTER2 adapter activation** — the "adapters available but
+  none are activated" / "Could not identify valid prediction head(s)" warnings fire
+  on both document and query embeds, so scores are compressed (on- and off-topic
+  both ~0.71) and only ranking is reliable. This is why the 0.75 backfill floor
+  currently behaves as "always backfill". Fixing the adapter is the prerequisite for
+  making the score floor discriminative; retune the floor afterward.
+- [ ] **Live end-to-end re-test** of the quantization question on the warm corpus to
+  confirm a genuinely grounded memo (backend proven; the paid live run was not
+  repeated this session).
+
+## Current review (2026-07-19)
+
+- **End-to-end review + hygiene pass.** Re-verified the suite (140 passing on
+  Python 3.11, 3.12, 3.13), found and fixed a set of small but real issues.
+- **Local `.env` config drift fixed.** `.env` had drifted to the known-bad
+  under-provisioned config (`deepseek-chat`, `AGENT_MAX_ITERATIONS=6`) plus
+  undocumented drift: `EMBEDDING_MODEL=sentence-transformers/allenai-specter`
+  (SPECTER1 base with SPECTER2 adapters) and `LLM_MAX_TOKENS=3000`. All four now
+  match the validated `.env.example` defaults.
+- **Embedding config validation added and review-hardened.** `TextEmbedder`
+  rejects the known SPECTER1-base/canonical-SPECTER2-adapter mismatch that
+  caused the local drift. Validation is deliberately conservative for unknown
+  repository names and local paths, avoiding false compatibility claims and
+  preserving valid renamed/fine-tuned adapters. Six focused tests cover the
+  accepted and rejected cases.
+- **Dependency truth.** `requests` and `pydantic` are now declared direct
+  dependencies (previously resolved only transitively). `pandas` remains direct
+  because the public `papers_to_dataframe` compatibility helper is retained.
+  Lock regenerated.
+- **Format gate in CI.** `ruff format --check` was failing on three files and CI
+  didn't run it; files reformatted and the check is now a CI step. CI also runs
+  pytest with `--cov=src` (informational, no threshold yet).
+- **Dead surface removed without breaking compatibility.** Deleted
+  `config/categories.yaml` (unreferenced, but previously copied into the Docker
+  image) and legacy `scripts/run_arxiv_search.py`. The root `app.py` ASGI shim,
+  `src.vector_store.VectorStore` alias/export, and public `ArxivClient` helpers
+  remain for existing consumers, with regression tests. The stale
+  Streamlit-era `.devcontainer` now runs uvicorn instead. Ruff `target-version`
+  is `py311`, matching the supported floor.
+- **Superseded eval report removed.** `evals/reports/deepseek-v4-flash-fixture.*`
+  (the 3-case run of 2026-07-13) is deleted; `latest.*` (7-case, 2026-07-15)
+  remains the release evidence of record. This resolves the open
+  commit-or-regenerate decision.
+- **New coverage.** Direct tests for `CrossEncoderReranker` (faked
+  tokenizer/model), `Tracer` (faked `langfuse` module: trace/span creation,
+  failure resilience, no-key no-op), `Settings` env-parsing helpers, embedding
+  compatibility, and retained legacy imports/helpers. Suite grew 114 → 140.
+- **Review findings closed.** Reconciled `NEXT_PHASE.md` and the HTML project
+  brief with the seven-case `evals/reports/latest.*` evidence and repaired the
+  live-eval link.
+- **Still open:** the clean-checkout release rebuild is blocked in this
+  environment (no Docker daemon); the P2 operator-console items, the optional
+  hosted demo, and the Qdrant 1.9→1.18 data-migration note are unchanged.
+- **Verification:** `uv run pytest -q` 140 passed on 3.11/3.12/3.13;
+  `ruff check` and `ruff format --check` clean; offline core quality gate
+  passing (run with `--jsonl`/`--markdown` redirected so `latest.*` is not
+  clobbered — the eval runner's default output paths overwrite the release
+  evidence).
 
 ## Current review (2026-07-15)
 
@@ -102,6 +238,7 @@ not a release gate — see the rationale in "Deployment posture" below.
 - [x] Confirm JSONL run records and structured summary logs for the same run.
 - [x] Restart the stack and verify Qdrant corpus persistence.
 - [ ] Rebuild the committed release candidate from a clean checkout or CI runner.
+  (Blocked 2026-07-19: no Docker daemon in this environment.)
 
 ### Deployment posture (2026-07-15)
 
@@ -179,7 +316,7 @@ evidence below, which is more informative and free of a standing public endpoint
 
 ## Status at a glance
 
-The core product works end-to-end and is **runnable locally today**. It is scoped to a cited recommendation memo for AI/ML and scientific-ML engineering decisions; the evidence backend is arXiv/SPECTER/Qdrant only (no plan to add other source backends). Direct `uvicorn` smoke testing works without Docker, and the production-mode Docker Compose path now has a recorded two-paper ingest, authenticated multi-tool brief, full-text read, structured logs, required run records, and API/Qdrant restart with persistence. The final local image is 2.06 GB and uses CPU-only PyTorch. Live DeepSeek `deepseek-v4-flash` has been validated with the fixture corpus: 3/3 eval cases returned `ok`, no deterministic fallback, no warnings, no tool-call markup, and full-text success for all attempted papers. The Fly.io deployment manifest and image path are present, but the app has not been deployed from this checkout. The public deployment path runs the real agent loop with an LLM key, gated by `X-API-Key` and a tight per-IP limiter. Normal live synthesis is gated on successful full-text evidence when retrieved papers exist; if the run cannot meet that contract before budget/failure, the stream emits explicit degraded/error events instead of silently looking successful.
+The core product works end-to-end and is **runnable locally today**. It is scoped to a cited recommendation memo for AI/ML and scientific-ML engineering decisions; the evidence backend is arXiv/SPECTER/Qdrant only (no plan to add other source backends). Direct `uvicorn` smoke testing works without Docker, and the production-mode Docker Compose path now has a recorded two-paper ingest, authenticated multi-tool brief, full-text read, structured logs, required run records, and API/Qdrant restart with persistence. The final local image is 2.06 GB and uses CPU-only PyTorch. Live DeepSeek `deepseek-v4-flash` has been validated with the fixture corpus at the full 7-core-case scale: 7/7 `ok`, 0% hallucination, 100% citation grounding, no fallbacks or warnings. The Fly.io deployment manifest and image path are present, but the app has not been deployed from this checkout. The public deployment path runs the real agent loop with an LLM key, gated by `X-API-Key` and a tight per-IP limiter. Normal live synthesis is gated on successful full-text evidence when retrieved papers exist; if the run cannot meet that contract before budget/failure, the stream emits explicit degraded/error events instead of silently looking successful.
 
 ## Scope (2026-07-03)
 
@@ -235,7 +372,7 @@ The core product works end-to-end and is **runnable locally today**. It is scope
 
 These are the highest-priority guard-rail gaps still open.
 
-1. **Live eval report now has a clean DeepSeek fixture run, but needs a commit decision.** `evals/reports/deepseek-v4-flash-fixture.{jsonl,md}` records the latest live fixture-corpus run. It should either be committed as a qualified provider-cost report or regenerated as `latest.*` before release.
+1. ~~Live eval report commit decision~~ — resolved 2026-07-19: the superseded 3-case `deepseek-v4-flash-fixture.*` report was deleted; `evals/reports/latest.{jsonl,md}` (7-case, 2026-07-15) is the release evidence of record.
 2. **Static UI is useful but not yet a robust operator console.** It visualizes the run, but it does not yet expose config budgets, model/provider identity, retry controls, or persisted run history.
 3. **Deployment still needs a live smoke.** Fly config exists, but this checkout has not been deployed and validated against a public URL; local Fly CLI tooling is missing in this environment.
 
@@ -286,7 +423,7 @@ Confirmed the OpenAI-compatible backend works against a local model: the agent l
 
 ## In progress / partial
 
-- Eval harness exists (`evals/run_eval.py`, benchmark fixtures) and the latest named live DeepSeek fixture report is in `evals/reports/deepseek-v4-flash-fixture.{jsonl,md}`. Decide whether to commit that named report, regenerate `latest.*`, or keep reports untracked before release.
+- Eval harness exists (`evals/run_eval.py`, benchmark fixtures); the release evidence of record is `evals/reports/latest.{jsonl,md}` (7-case live DeepSeek fixture run, 2026-07-15). Note the runner's default output paths overwrite `latest.*` — pass `--jsonl`/`--markdown` for any run that should not replace the release evidence.
 - `evals/run_eval.py --fixture-corpus` runs the configured live LLM against deterministic fixture papers and synthetic full text, so provider cost can be measured without external retrieval dependencies.
 - Direct uvicorn smoke testing works in local fallback mode and persistent Qdrant
   mode. The packaged production-mode path is also verified locally; only the public
@@ -343,11 +480,10 @@ in `README.md` and runs on `http://127.0.0.1:8767`.
 ## Suggested next steps
 
 1. Commit the release candidate, rebuild it from a clean checkout or CI runner, and
-   record the image digest.
+   record the image digest. (Blocked in the current local environment: no Docker
+   daemon; attempted 2026-07-19.)
 2. Install Fly CLI and run the production smoke: deploy, hit `/health`, ingest a tiny
    corpus, stream one brief, restart the machine, and confirm Qdrant persistence plus
    run-record/log output.
 3. Capture a real-provider Langfuse trace, measured usage/cost, JSONL record, and
    structured completion log for the same public run.
-4. Decide whether the named DeepSeek report or regenerated `latest.*` is the release
-   evidence of record, then reconcile `README.md`, `NEXT_PHASE.md`, and report prose.

@@ -233,6 +233,19 @@ class QdrantPaperVectorStore(PaperVectorStore):
             self.client.count(collection_name=self.settings.qdrant_collection).count
         )
 
+    def close(self) -> None:
+        """Flush and release the client.
+
+        Embedded local mode (``qdrant_path``) keeps recent writes in an
+        in-memory segment and persists them to disk when the client closes.
+        Relying on interpreter-exit finalization is unreliable, so writers
+        (e.g. the corpus seeder) must call this explicitly to guarantee the
+        corpus survives the process.
+        """
+        close = getattr(self.client, "close", None)
+        if callable(close):
+            close()
+
 
 def build_vector_store(settings: Settings) -> PaperVectorStore:
     if settings.vector_store_backend.lower() == "memory":

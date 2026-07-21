@@ -87,6 +87,21 @@ class Settings:
     agent_max_tool_calls: int = _int_env("AGENT_MAX_TOOL_CALLS", 12)
     agent_max_search_calls: int = _int_env("AGENT_MAX_SEARCH_CALLS", 3)
 
+    # Agent search auto-backfill: when the model's `search_papers` call finds no
+    # local paper at or above the relevance floor, transparently fetch fresh
+    # arXiv papers for that query, index them, and re-run the search once. This
+    # makes cold-start questions work without the model having to notice thin
+    # results and choose `fetch_arxiv` itself. Deduped per distinct query per run
+    # and bounded by SEARCH_BACKFILL_MAX_PAPERS. Adds one arXiv round-trip on the
+    # first search of an uncovered topic; set AGENT_SEARCH_AUTO_BACKFILL=false to
+    # rely solely on the indexed corpus. The floor is SPECTER2 cosine similarity;
+    # 0.75 treats a best local hit below that as "topic not covered". Retune if
+    # the query-adapter activation changes typical score magnitudes.
+    agent_search_auto_backfill: bool = _bool_env("AGENT_SEARCH_AUTO_BACKFILL", True)
+    agent_search_backfill_min_score: float = _float_env(
+        "AGENT_SEARCH_BACKFILL_MIN_SCORE", 0.75
+    )
+
     # Transcript compaction: each provider turn must include the prior
     # tool-call/tool-result pairs, but older bulky payloads can be replaced with
     # bounded summaries once the model has seen them.

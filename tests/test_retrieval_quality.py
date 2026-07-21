@@ -230,6 +230,142 @@ def test_vector_retrieve_can_rerank_candidate_pool():
     assert [item.paper.id for item in result.items] == ["p3", "p2"]
 
 
+class AsymmetricEmbedder:
+    """Embeds documents and queries into orthogonal vectors.
+
+    A backfilled document therefore never matches the query, so a second search
+    for the same topic would re-trigger the score-based backfill unless the
+    per-query dedup guard suppresses it.
+    """
+
+    def __init__(self):
+        self.document_texts: list[str] = []
+        self.query_texts: list[str] = []
+
+    def encode_documents(self, texts, batch_size=32):
+        self.document_texts.extend(texts)
+        return np.array([[0.0, 1.0] for _ in texts])
+
+    def encode_queries(self, texts, batch_size=32):
+        self.query_texts.extend(texts)
+        return np.array([[1.0, 0.0] for _ in texts])
+
+
+def _backfill_toolset(tools: ResearchTools, question: str) -> ResearchToolset:
+    return ResearchToolset(
+        tools, BriefRequest(research_question=question, max_papers=5)
+    )
+
+
+def test_search_papers_auto_backfills_when_corpus_is_empty():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        query_expansion_enabled=False,
+        search_backfill_query_expansion=False,
+        agent_search_auto_backfill=True,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    arxiv_client = RecordingArxivClient(paper_id="2501.09999")
+    tools = ResearchTools(settings, arxiv_client, RecordingEmbedder(), store)
+    toolset = _backfill_toolset(tools, "Which quantization method preserves accuracy?")
+
+    content, meta = toolset._search_papers("quantization methods", 5)
+    payload = json.loads(content)
+
+    assert arxiv_client.calls == [("all:quantization methods", 25)]
+    assert payload["backfilled"] == 1
+    assert meta["backfilled"] == 1
+    assert [p["id"] for p in payload["papers"]] == ["2501.09999"]
+
+
+def test_search_papers_skips_backfill_when_local_hit_is_strong():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_search_auto_backfill=True,
+        agent_search_backfill_min_score=0.75,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    store.upsert([_paper("local", "Local Strong")], np.array([[1.0, 0.0]]))
+    arxiv_client = RecordingArxivClient()
+    tools = ResearchTools(settings, arxiv_client, RecordingEmbedder(), store)
+    toolset = _backfill_toolset(tools, "A question about operator learning methods")
+
+    content, _meta = toolset._search_papers("operators", 1)
+    payload = json.loads(content)
+
+    assert arxiv_client.calls == []
+    assert "backfilled" not in payload
+    assert [p["id"] for p in payload["papers"]] == ["local"]
+
+
+def test_search_papers_backfills_on_off_topic_local_hit():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        query_expansion_enabled=False,
+        search_backfill_query_expansion=False,
+        agent_search_auto_backfill=True,
+        agent_search_backfill_min_score=0.75,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    # Off-topic paper: cosine with the [1,0] query is 0.5, below the 0.75 floor.
+    store.upsert([_paper("offtopic", "Off Topic")], np.array([[0.5, 0.8660254]]))
+    arxiv_client = RecordingArxivClient(paper_id="2501.07777")
+    tools = ResearchTools(settings, arxiv_client, RecordingEmbedder(), store)
+    toolset = _backfill_toolset(tools, "Quantization accuracy for on-device serving")
+
+    content, _meta = toolset._search_papers("quantization", 5)
+    payload = json.loads(content)
+
+    assert arxiv_client.calls == [("all:quantization", 25)]
+    assert payload["backfilled"] == 1
+    assert "2501.07777" in [p["id"] for p in payload["papers"]]
+
+
+def test_search_papers_respects_auto_backfill_toggle():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_search_auto_backfill=False,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    arxiv_client = RecordingArxivClient()
+    tools = ResearchTools(settings, arxiv_client, RecordingEmbedder(), store)
+    toolset = _backfill_toolset(tools, "A question about anything at all here")
+
+    content, meta = toolset._search_papers("anything", 1)
+    payload = json.loads(content)
+
+    assert arxiv_client.calls == []
+    assert meta == {"returned": 0}
+    assert payload["returned"] == 0
+    assert "backfilled" not in payload
+    assert "fetch_arxiv" in payload["hint"]
+
+
+def test_search_papers_backfills_each_query_once_per_run():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        query_expansion_enabled=False,
+        search_backfill_query_expansion=False,
+        agent_search_auto_backfill=True,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    arxiv_client = RecordingArxivClient(paper_id="2501.05555")
+    tools = ResearchTools(settings, arxiv_client, AsymmetricEmbedder(), store)
+    toolset = _backfill_toolset(tools, "Quantization tradeoffs for edge inference")
+
+    toolset._search_papers("quantization", 5)
+    # The backfilled paper is orthogonal to the query, so the corpus still lacks
+    # a strong hit; only the per-query dedup guard prevents a second fetch.
+    toolset._search_papers("quantization", 5)
+
+    assert arxiv_client.calls == [("all:quantization", 25)]
+
+
 def test_search_papers_returns_fetch_hint_when_floor_filters_all_results():
     settings = Settings(
         vector_store_backend="memory",

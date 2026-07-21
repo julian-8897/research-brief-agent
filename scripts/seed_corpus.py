@@ -57,7 +57,9 @@ QUERY_MANIFEST: dict[str, str] = {
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed the benchmark evidence corpus from arXiv.")
+    parser = argparse.ArgumentParser(
+        description="Seed the benchmark evidence corpus from arXiv."
+    )
     parser.add_argument(
         "--qdrant-path",
         default=".local/qdrant-corpus",
@@ -77,14 +79,22 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.dry_run:
-        print(f"Manifest: {len(QUERY_MANIFEST)} queries, {args.per_question} papers each")
+        print(
+            f"Manifest: {len(QUERY_MANIFEST)} queries, {args.per_question} papers each"
+        )
         print(f"Target store: {args.qdrant_path} (embedded Qdrant)\n")
         for qid, query in QUERY_MANIFEST.items():
             print(f"[{qid}]\n    {query}\n")
         return
 
-    # Force embedded Qdrant before settings import (Settings reads env at import time).
+    # Force embedded Qdrant before settings import (Settings reads env at import
+    # time). Both the path and the backend must be pinned: a local .env with
+    # VECTOR_STORE_BACKEND=memory would otherwise be loaded and silently send the
+    # seed into an in-memory store that is discarded at process exit. These are
+    # set before import and python-dotenv does not override existing env vars, so
+    # the seed always writes to the persistent embedded corpus.
     os.environ["QDRANT_PATH"] = args.qdrant_path
+    os.environ["VECTOR_STORE_BACKEND"] = "qdrant"
 
     from src.agent.tools import ResearchTools
     from src.arxiv_client import ArxivClient
@@ -109,14 +119,28 @@ def main() -> None:
     total_new = 0
     for qid, query in QUERY_MANIFEST.items():
         try:
-            new_count, papers = tools.fetch_and_ingest(query, max_papers=args.per_question)
+            new_count, papers = tools.fetch_and_ingest(
+                query, max_papers=args.per_question
+            )
         except Exception as exc:  # arXiv API is flaky; log and keep going.
             print(f"  [{qid}] ERROR: {exc}")
             continue
         total_new += new_count
-        print(f"  [{qid}] fetched {len(papers):>3} | new {new_count:>3} | corpus {vector_store.count():>4}")
+        print(
+            f"  [{qid}] fetched {len(papers):>3} | new {new_count:>3} | corpus {vector_store.count():>4}"
+        )
 
-    print(f"\nDone. {total_new} new papers embedded; corpus now holds {vector_store.count()} papers.")
+    final_count = vector_store.count()
+    # Embedded local Qdrant flushes to disk on close; without this the in-memory
+    # writes are lost when the process exits (interpreter finalization does not
+    # reliably run the client's destructor).
+    close = getattr(vector_store, "close", None)
+    if callable(close):
+        close()
+
+    print(
+        f"\nDone. {total_new} new papers embedded; corpus now holds {final_count} papers."
+    )
 
 
 if __name__ == "__main__":
