@@ -99,14 +99,34 @@ un-useful today.** Findings, with run evidence:
   missing are spread one-per-case, and 14/16 cases have at least one relevant hit
   in the top 10.
 
+### Live end-to-end re-test (2026-07-21) — retrieval gap closed
+
+The exact question that produced the honest refusal in the review above ("What
+quantization method (GPTQ, AWQ, QLoRA) best preserves accuracy for on-device LLM
+serving?") was re-run live against the warm corpus (run
+`046d00b4ce6a4324a81b961c396940fc`, `deepseek-v4-flash`):
+
+- **Real grounded memo, not a refusal.** 12 papers retrieved (scores 0.748–0.764,
+  above the new 0.72 floor so no wasteful backfill), 3/3 full-text reads
+  succeeded, 6 cited papers — all on-topic quantization work (quantization
+  scaling laws, edge-AI quantized-LLM benchmarks, on-device PTQ) — and every
+  inline citation resolved to a retrieved paper. `status=completed`,
+  **zero warnings**, no fallbacks, no ungrounded-citation strips.
+- The memo recommends AWQ with explicit caveats and correctly flags that no
+  retrieved paper does a direct three-way head-to-head — the honest-uncertainty
+  behavior, now backed by on-topic evidence instead of an empty corpus.
+- Measured: 39 s end-to-end, 7 LLM turns, 7 tool calls, 48.5k input / 2.5k
+  output tokens, ~$0.18 at configured estimate rates. The three `search_papers`
+  calls used distinct refined queries and converged to full text when the
+  discovery budget fired — the search-spam failure mode is contained by the
+  budget mechanism, so item C stays low priority.
+
 ### Still open — retrieval
 
 - [ ] **C. Prompt/budget tuning** so the model reaches for `fetch_arxiv` early and
-  stops spamming redundant `search_papers`. Band-aid on top of A; lower priority now
-  that A+B are in.
-- [ ] **Live end-to-end re-test** of the quantization question on the warm corpus to
-  confirm a genuinely grounded memo (backend proven; the paid live run was not
-  repeated this session).
+  stops spamming redundant `search_papers`. Band-aid on top of A; low priority —
+  the live re-test showed the discovery budget containing the spam (3 distinct
+  searches, then convergence to full text).
 
 ## Current review (2026-07-19)
 
