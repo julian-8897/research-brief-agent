@@ -1,8 +1,13 @@
 from types import SimpleNamespace
 
+import pytest
 import torch
 
-from src.embeddings import TextEmbedder, build_paper_embedding_text
+from src.embeddings import (
+    TextEmbedder,
+    build_paper_embedding_text,
+    validate_adapter_compatibility,
+)
 
 
 def test_build_paper_embedding_text_uses_title_and_abstract():
@@ -59,3 +64,43 @@ def test_text_embedder_uses_distinct_query_and_document_adapters():
     assert fake_model.activated == ["adhoc_query", "proximity"]
     assert query_embeddings.shape == (1, 768)
     assert document_embeddings.shape == (1, 768)
+
+
+def test_validate_adapter_compatibility_accepts_specter2_pairing():
+    validate_adapter_compatibility(
+        "allenai/specter2_base", "allenai/specter2", "allenai/specter2_adhoc_query"
+    )
+
+
+def test_validate_adapter_compatibility_accepts_non_specter2_custom_pairing():
+    validate_adapter_compatibility("some/base-model", "org/doc-adapter", "org/query")
+
+
+def test_validate_adapter_compatibility_accepts_renamed_specter2_adapters():
+    validate_adapter_compatibility(
+        "allenai/specter2_base", "local/document-adapter", "/models/query-adapter"
+    )
+
+
+def test_validate_adapter_compatibility_does_not_infer_from_unknown_names():
+    validate_adapter_compatibility(
+        "/models/renamed-base", "allenai/specter2", "allenai/specter2_adhoc_query"
+    )
+
+
+def test_validate_adapter_compatibility_rejects_specter2_adapters_on_other_base():
+    with pytest.raises(ValueError, match="require a SPECTER2 base model"):
+        validate_adapter_compatibility(
+            "sentence-transformers/allenai-specter",
+            "allenai/specter2",
+            "allenai/specter2_adhoc_query",
+        )
+
+
+def test_text_embedder_rejects_mismatched_configuration_at_construction():
+    with pytest.raises(ValueError, match="require a SPECTER2 base model"):
+        TextEmbedder(
+            "sentence-transformers/allenai-specter",
+            document_adapter="allenai/specter2",
+            query_adapter="allenai/specter2_adhoc_query",
+        )

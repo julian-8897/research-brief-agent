@@ -26,6 +26,8 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "arxiv>=1.4.0",
     "pandas>=1.5.0",
+    "pydantic>=2.0.0",
+    "requests>=2.31.0",
     "adapters>=1.0.0",
     "torch>=2.0.0",
     "transformers>=4.40.0",
@@ -59,7 +61,7 @@ Issues = "https://github.com/julian-8897/research-brief-agent/issues"
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
@@ -67,7 +69,6 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "evals/run_eval.py" = ["E402"]
-"scripts/run_arxiv_search.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"

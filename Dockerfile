@@ -26,7 +26,6 @@ RUN python -c "import os; from adapters import AutoAdapterModel; from transforme
 
 COPY src ./src
 COPY static ./static
-COPY config ./config
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 COPY --from=qdrant /qdrant /qdrant

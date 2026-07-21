@@ -45,7 +45,9 @@ def test_best_effort_swallows_io_errors_and_logs_once(tmp_path, caplog):
         store.event("run", {"event": {"event": "final"}})
         store.finish("run", {"status": "completed"})
 
-    failures = [r for r in caplog.records if "run_record_write_failed" in r.getMessage()]
+    failures = [
+        r for r in caplog.records if "run_record_write_failed" in r.getMessage()
+    ]
     assert len(failures) == 1
 
 

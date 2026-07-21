@@ -238,7 +238,7 @@
           <tr><td>Operability</td><td><span class="status done">Implemented</span></td><td>Stable SSE schema, JSON logs, Langfuse wrapper, JSONL run records, request/run IDs.</td><td>Good primitives; production traces remain unproven.</td></tr>
           <tr><td>Security</td><td><span class="status partial">Single-node</span></td><td>API-key allow-list and in-process per-IP limiter; production startup rejects missing keys.</td><td>Appropriate for one Fly machine, not distributed scaling.</td></tr>
           <tr><td>Deployment</td><td><span class="status partial">Local verified</span></td><td>Production-mode Compose passed auth, readiness, two-paper ingest, multi-tool brief, records/logs, and restart persistence.</td><td>Fly and clean-checkout rebuild remain unverified.</td></tr>
-          <tr><td>Evaluation</td><td><span class="status done">Gated</span></td><td>Deterministic metrics, fixture coverage checks, CI quality gate, and live judges exist; named live report passes 3/3.</td><td>Offline contract restored; live report still needs a release refresh.</td></tr>
+          <tr><td>Evaluation</td><td><span class="status done">Gated</span></td><td>Deterministic metrics, fixture coverage checks, CI quality gate, and live judges exist; the release report passes 7/7.</td><td>Offline and live evidence now share one release snapshot.</td></tr>
           <tr><td>Operator UI</td><td><span class="status partial">Prototype</span></td><td>Ask-first console, timeline, evidence, diagnostics, telemetry gauges.</td><td>No persisted history, retry, or visible budget/model controls.</td></tr>
         </tbody>
       </table>
@@ -253,8 +253,8 @@
         <article class="finding complete"><div class="rank">✓</div><div><h3>Hermetic evaluation contract repaired</h3><p>The fixture now has one relevant synthetic paper per benchmark case, lexical deterministic embeddings, explicit coverage validation, actionable quality-gate failures, regression tests, and a seven-case CI gate. All 16 offline cases pass locally.</p></div><span class="priority">Completed</span></article>
         <article class="finding complete"><div class="rank">✓</div><div><h3>Packaged local release smoke completed</h3><p>The 2.06 GB CPU image passed API + Qdrant startup, authentication, ingest, search, full-text reading, cited synthesis, JSONL records, structured logs, and restart persistence. The smoke also exposed and fixed the Qdrant 1.9.2 server / 1.18 client mismatch.</p></div><span class="priority">Completed</span></article>
         <article class="finding"><div class="rank">P0</div><div><h3>Prove the public release path</h3><p>Rebuild the committed candidate from a clean checkout, deploy it to Fly, and repeat readiness, authenticated brief, trace, record/log, and restart-persistence checks with a real provider.</p></div><span class="priority">Release gate</span></article>
-        <article class="finding"><div class="rank">P1</div><div><h3>Reconcile the evidence of record</h3><p><span class="mono">README.md</span>, <span class="mono">PROGRESS.md</span>, <span class="mono">NEXT_PHASE.md</span>, and <span class="mono">latest.*</span> carry different test totals and eval eras. Choose the named DeepSeek report or regenerate <span class="mono">latest.*</span>, then update one release snapshot everywhere.</p></div><span class="priority">Trust</span></article>
-        <article class="finding"><div class="rank">P1</div><div><h3>Make Python support explicit</h3><p>The image uses 3.12 and CI uses 3.13, but package metadata says only <span class="mono">&gt;=3.10</span>. Local <span class="mono">uv</span> selected 3.14 and the first test collection failed until 3.12 was selected and synchronized. Add <span class="mono">.python-version</span>, test a small matrix, or bound the supported range.</p></div><span class="priority">Packaging</span></article>
+        <article class="finding complete"><div class="rank">✓</div><div><h3>Evidence of record reconciled</h3><p><span class="mono">latest.*</span> is the seven-case live DeepSeek release snapshot; the superseded three-case named report has been retired and project documentation points to the current artifact.</p></div><span class="priority">Completed</span></article>
+        <article class="finding complete"><div class="rank">✓</div><div><h3>Python support explicit</h3><p>Package metadata supports Python 3.11–3.13, CI tests all three versions, and the Docker image remains pinned to Python 3.12.</p></div><span class="priority">Completed</span></article>
         <article class="finding"><div class="rank">P2</div><div><h3>Verify observability in the live path</h3><p>The named DeepSeek report shows no trace coverage even though Langfuse spans and persisted records are implemented. A production smoke should capture a trace ID, JSONL run record, structured summary log, measured tokens, and cost for the same run.</p></div><span class="priority">Operations</span></article>
       </div>
     </section>
@@ -266,9 +266,9 @@
       </div>
       <div class="evidence-grid">
         <article class="evidence-card live">
-          <h3>Named DeepSeek fixture report</h3>
+          <h3>Release DeepSeek fixture report</h3>
           <p>Useful evidence that the multi-turn policy converges with a real provider.</p>
-          <ul><li>3 of 3 cases completed without fallback or warnings</li><li>5–6 LLM turns and 5–6 tool calls per case</li><li>2/2, 2/2, and 3/3 full-text successes</li><li>22.8–25.9 second latency</li><li>Estimated $0.068–$0.077 per brief</li></ul>
+          <ul><li>7 of 7 cases completed without fallback or warnings</li><li>5–8 LLM turns and 5–8 tool calls per case</li><li>14/14 attempted full-text reads succeeded</li><li>25.8–30.9 second latency</li><li>Estimated $0.088–$0.126 per brief</li></ul>
         </article>
         <article class="evidence-card offline">
           <h3>Fresh offline core quality gate</h3>
@@ -286,13 +286,13 @@
       <div class="roadmap">
         <article class="step"><h3>Evaluation integrity ✓</h3><p>Fixture alignment, lexical deterministic retrieval, regression tests, actionable failures, and the offline core CI quality gate are complete.</p></article>
         <article class="step"><h3>Packaged system ✓</h3><p>The production-mode local image now has recorded auth, persistence, restart, and record/log evidence, including a genuine multi-tool full-text brief.</p></article>
-        <article class="step"><h3>Deploy and freeze the snapshot</h3><p>Clean-build the committed candidate, run the Fly smoke with real secrets, capture trace/cost evidence, then reconcile NEXT_PHASE and eval reports.</p></article>
+        <article class="step"><h3>Deploy and freeze the snapshot</h3><p>Clean-build the committed candidate and, if a hosted demo is wanted, run the Fly smoke with real secrets and capture trace/cost evidence.</p></article>
       </div>
     </section>
 
     <footer class="foot">
-      <p>Prepared from the working tree atop <span class="mono">b73a7bb</span>. This is a review snapshot; <a href="../PROGRESS.md">PROGRESS.md</a> remains the living source of truth.</p>
-      <nav aria-label="Project references"><a href="../README.md">README</a><a href="../PROGRESS.md">Progress</a><a href="../NEXT_PHASE.md">Next phase</a><a href="../evals/reports/deepseek-v4-flash-fixture.md">Live eval</a></nav>
+      <p>Review snapshot refreshed through 2026-07-19; <a href="../PROGRESS.md">PROGRESS.md</a> remains the living source of truth.</p>
+      <nav aria-label="Project references"><a href="../README.md">README</a><a href="../PROGRESS.md">Progress</a><a href="../NEXT_PHASE.md">Next phase</a><a href="../evals/reports/latest.md">Live eval</a></nav>
     </footer>
   </main>
 </body>

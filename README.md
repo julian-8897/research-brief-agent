@@ -255,22 +255,25 @@ collection.
 Current verification:
 
 ```text
-114 passed, 1 warning on Python 3.11, 3.12, and 3.13; ruff clean;
-7-case offline core quality gate passing
+140 passed, 1 warning on Python 3.11, 3.12, and 3.13; ruff check and
+format clean; 7-case offline core quality gate passing
 ```
 
 ## Project Structure
 
 ```text
 src/
-  api/             FastAPI app and streaming routes
+  api/             FastAPI app, SSE contract, and streaming routes
   agent/           Tool-using agent loop, evidence tools, and toolset adapter
   llm/             Pluggable tool-using backends (Anthropic, OpenAI-compatible)
-  ingestion/       arXiv query/date normalization and paper fetching
+  ingestion/       arXiv query/date normalization, paper fetching, PDF full text
   retrieval/       Qdrant and in-memory vector stores
-  observability/   Langfuse tracing wrapper
+  observability/   Langfuse tracing, structured logging, JSONL run records
   arxiv_client.py  arXiv metadata client
-  embeddings.py    SPECTER embedding helper
+  embeddings.py    SPECTER2 asymmetric embedder with adapter validation
+  models.py        Pydantic request/response models
+  rerank.py        Optional cross-encoder reranker
+  settings.py      Env-driven configuration (frozen dataclass)
 evals/
   benchmarks/      Curated AI/ML & scientific-ML decision questions
   run_eval.py      Latency/cost evaluation runner

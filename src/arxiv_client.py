@@ -83,35 +83,21 @@ class ArxivClient:
         return [self.normalize_result(result) for result in self.client.results(search)]
 
     def get_recent_papers(self, category: str = "cs.AI", days: int = 7) -> list[dict]:
-        """
-        Get recent papers from a specific category.
-
-        Args:
-            category (str): arXiv category code (e.g., "cs.AI").
-            days (int): Number of days back to include.
-
-        Returns:
-            List[Dict]: List of recent paper metadata dictionaries.
-        """
+        """Get papers submitted to an arXiv category within the recent window."""
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
-
-        query = f"cat:{category} AND submittedDate:[{start_date.strftime('%Y%m%d')}* TO {end_date.strftime('%Y%m%d')}*]"
-        # This helper is about recency, so keep it ordered newest-first.
+        query = (
+            f"cat:{category} AND "
+            f"submittedDate:[{start_date.strftime('%Y%m%d')}* TO "
+            f"{end_date.strftime('%Y%m%d')}*]"
+        )
         return self.search_papers(
             query=query,
             max_results=50,
             sort_by=arxiv.SortCriterion.SubmittedDate,
         )
 
-    def papers_to_dataframe(self, papers: list[dict]) -> pd.DataFrame:
-        """
-        Convert papers list to pandas DataFrame.
-
-        Args:
-            papers (List[Dict]): List of paper metadata dictionaries.
-
-        Returns:
-            pd.DataFrame: DataFrame containing paper data.
-        """
+    @staticmethod
+    def papers_to_dataframe(papers: list[dict]) -> pd.DataFrame:
+        """Convert normalized paper records to a pandas DataFrame."""
         return pd.DataFrame(papers)

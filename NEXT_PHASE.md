@@ -9,7 +9,7 @@
 >    record is the local live-provider eval, not a public URL. See the "Deployment
 >    posture" note in PROGRESS.md.
 > 2. **Status numbers below are stale** (they read "51 tests" / "3/3 fixture cases").
->    Current: 114 tests pass on Python 3.11–3.13; the live fixture eval runs 7 core
+>    Current: 140 tests pass on Python 3.11–3.13; the live fixture eval runs 7 core
 >    cases at 0% hallucination and 100% citation grounding after strict-grounding
 >    enforcement landed.
 >
@@ -66,10 +66,9 @@ limit, since the agent loop is the whole point.
    a restart persistence check.
 
 6. **Cost/transcript trimming, with a qualified eval report.** Done for the fixture path:
-   transcript compaction is implemented, DeepSeek V4 flash thinking mode is disabled for
-   normal assistant content/tool calls, and `evals/reports/deepseek-v4-flash-fixture.*`
-   records a 3-case live fixture run. Remaining work is to decide whether to commit the
-   named report or regenerate `latest.*` for release.
+   transcript compaction is implemented and DeepSeek V4 flash thinking mode is disabled
+   for normal assistant content/tool calls. The original 3-case named report was later
+   superseded by the 7-case `evals/reports/latest.*` release evidence.
 
 7. **Formalize the SSE event contract.** Done: `src/api/sse.py` defines stable event
    types and required fields, `/briefs/stream` validates events before writing them,

@@ -9,6 +9,46 @@ DEFAULT_EMBEDDING_MODEL = "allenai/specter2_base"
 DEFAULT_DOCUMENT_ADAPTER = "allenai/specter2"
 DEFAULT_QUERY_ADAPTER = "allenai/specter2_adhoc_query"
 
+_KNOWN_SPECTER1_MODELS = frozenset(
+    {
+        "allenai/specter",
+        "sentence-transformers/allenai-specter",
+    }
+)
+_CANONICAL_SPECTER2_ADAPTERS = frozenset(
+    {
+        DEFAULT_DOCUMENT_ADAPTER,
+        DEFAULT_QUERY_ADAPTER,
+    }
+)
+
+
+def validate_adapter_compatibility(
+    model_name: str, document_adapter: str, query_adapter: str
+) -> None:
+    """Reject known SPECTER1-base/SPECTER2-adapter mismatches.
+
+    Model and adapter identifiers may be arbitrary Hugging Face repositories or
+    local paths, so their names cannot prove architectural compatibility. Keep
+    custom combinations available and reject only the known bad pairing that
+    previously caused local configuration drift.
+    """
+    normalized_model = model_name.strip().lower().rstrip("/")
+    normalized_adapters = {
+        document_adapter.strip().lower().rstrip("/"),
+        query_adapter.strip().lower().rstrip("/"),
+    }
+    if (
+        normalized_model in _KNOWN_SPECTER1_MODELS
+        and normalized_adapters & _CANONICAL_SPECTER2_ADAPTERS
+    ):
+        raise ValueError(
+            "Canonical SPECTER2 adapters require a SPECTER2 base model, got "
+            f"{model_name!r}. Set EMBEDDING_MODEL to "
+            f"{DEFAULT_EMBEDDING_MODEL!r} or configure adapters trained for "
+            "the selected base model."
+        )
+
 
 def build_paper_embedding_text(paper: dict) -> str:
     """Build the SPECTER-style title/abstract input used for paper indexing."""
@@ -29,6 +69,7 @@ class TextEmbedder:
         document_adapter_name: str = "proximity",
         query_adapter_name: str = "adhoc_query",
     ):
+        validate_adapter_compatibility(model_name, document_adapter, query_adapter)
         self.model_name = model_name
         self.document_adapter = document_adapter
         self.query_adapter = query_adapter

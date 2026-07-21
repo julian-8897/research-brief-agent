@@ -43,8 +43,11 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      - name: Format check
+        run: uv run ruff format --check .
+
       - name: Test
-        run: uv run pytest -q
+        run: uv run pytest -q --cov=src --cov-report=term-missing
 
       - name: Offline core evaluation quality gate
         run: >-

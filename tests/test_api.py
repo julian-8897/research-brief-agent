@@ -14,6 +14,13 @@ from src.retrieval import InMemoryVectorStore
 from src.settings import Settings
 
 
+def test_root_app_module_remains_a_compatible_asgi_entry_point():
+    from app import app as compatibility_app
+    from src.api.main import app as canonical_app
+
+    assert compatibility_app is canonical_app
+
+
 class FakeEmbedder:
     def encode_documents(self, texts, batch_size=32):
         return np.array([[1.0, 0.0] for _ in texts])

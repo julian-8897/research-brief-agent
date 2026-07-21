@@ -1,5 +1,6 @@
 import numpy as np
 
+from src import VectorStore
 from src.models import PaperRecord
 from src.retrieval.store import InMemoryVectorStore, _point_id
 
@@ -46,3 +47,13 @@ def test_in_memory_vector_store_reports_existing_ids():
 def test_qdrant_point_id_is_deterministic_uuid():
     assert _point_id("2401.00001") == _point_id("2401.00001")
     assert len(_point_id("2401.00001").split("-")) == 5
+
+
+def test_legacy_vector_store_export_forwards_add_papers():
+    store = VectorStore(embedding_dimension=2)
+    store.add_papers(
+        [PaperRecord(id="1", title="Legacy", summary="compatibility")],
+        np.array([[1.0, 0.0]]),
+    )
+
+    assert store.count() == 1

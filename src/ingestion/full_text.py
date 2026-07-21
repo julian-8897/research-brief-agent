@@ -84,7 +84,9 @@ def _download(url: str, timeout: float) -> bytes:
     return response.content
 
 
-def _extract_text(data: bytes, char_budget: int, *, extractor: PdfExtractorName = "auto"):
+def _extract_text(
+    data: bytes, char_budget: int, *, extractor: PdfExtractorName = "auto"
+):
     try:
         return extract_pdf(data, char_budget=char_budget, extractor=extractor)
     except PdfExtractionError as exc:

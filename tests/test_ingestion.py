@@ -1,7 +1,7 @@
 import arxiv
 import pytest
 
-from src.arxiv_client import resolve_sort_criterion
+from src.arxiv_client import ArxivClient, resolve_sort_criterion
 from src.ingestion import build_arxiv_query, fetch_arxiv_papers
 from src.models import DateRange
 
@@ -81,3 +81,26 @@ def test_fetch_arxiv_papers_defaults_to_relevance():
     client = _RecordingArxiv()
     fetch_arxiv_papers(client, query="rag", max_papers=5)
     assert client.calls[0]["sort_by"] == arxiv.SortCriterion.Relevance
+
+
+def test_legacy_recent_papers_helper_uses_submitted_date_sort(monkeypatch):
+    client = ArxivClient()
+    calls = []
+
+    def fake_search(query, max_results, sort_by):
+        calls.append((query, max_results, sort_by))
+        return []
+
+    monkeypatch.setattr(client, "search_papers", fake_search)
+
+    assert client.get_recent_papers("cs.LG", days=3) == []
+    query, max_results, sort_by = calls[0]
+    assert query.startswith("cat:cs.LG AND submittedDate:[")
+    assert max_results == 50
+    assert sort_by == arxiv.SortCriterion.SubmittedDate
+
+
+def test_legacy_dataframe_helper_remains_available():
+    frame = ArxivClient.papers_to_dataframe([{"id": "2401.00001"}])
+
+    assert frame.to_dict(orient="records") == [{"id": "2401.00001"}]
