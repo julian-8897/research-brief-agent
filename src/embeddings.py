@@ -84,8 +84,18 @@ class TextEmbedder:
             with self._adapter_lock:
                 if self._model is not None:
                     return
+                import logging
+
                 from adapters import AutoAdapterModel
                 from transformers import AutoTokenizer
+
+                # The adapters library logs "Could not identify valid prediction
+                # head(s)" at INFO on every set_active_adapters call, because
+                # AutoAdapterModel is a with-heads class while SPECTER2 adapters
+                # carry no heads. The adapters apply correctly regardless (see
+                # scripts/calibrate_backfill_floor.py); demote the library's
+                # logger so this expected message stops reading as a defect.
+                logging.getLogger("adapters").setLevel(logging.WARNING)
 
                 self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
                 self._model = AutoAdapterModel.from_pretrained(self.model_name)

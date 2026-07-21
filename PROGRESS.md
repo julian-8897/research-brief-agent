@@ -76,17 +76,34 @@ un-useful today.** Findings, with run evidence:
 **Verification:** `uv run pytest -q` → 145 passed (was 140; +5 backfill tests);
 `ruff check` and `ruff format --check` clean.
 
+### Retrieval calibration (2026-07-21) — adapter bug disproven, floor retuned
+
+- **The suspected adapter bug does not exist.** `scripts/calibrate_backfill_floor.py`
+  encodes fixed probe texts with the base model, the proximity adapter, and the
+  adhoc-query adapter: base-vs-proximity cosine 0.956, base-vs-adhoc 0.834, so both
+  adapters demonstrably apply and change outputs. The warnings are library noise:
+  `AutoAdapterModel` is a with-heads class, SPECTER2 adapters ship no prediction
+  heads, so `set_active_adapters` logs "Could not identify valid prediction
+  head(s)" at INFO on every call. The `adapters` logger is now demoted to WARNING
+  in `TextEmbedder._ensure_loaded`.
+- **The floor was retuned from measurement, not guessed.** Against the seeded
+  320-paper corpus, best-hit cosines for the 16 covered benchmark topics measured
+  **0.7318–0.8162**; the one measured uncovered topic (quantization pre-seed)
+  scored ~0.71–0.73. `AGENT_SEARCH_BACKFILL_MIN_SCORE` now defaults to **0.72**
+  (was 0.75, which false-triggered on 3/16 covered topics including quantization).
+  Within-list relevant/non-relevant bands overlap almost completely (medians
+  ~0.77 vs ~0.76), so absolute scores do not rank relevance — ranking within a
+  result list remains the reliable signal, and the floor is only a coverage tripwire.
+  Re-run the calibration script if the embedding model or corpus mix changes.
+- Corpus coverage check: 25/31 real benchmark `relevant_ids` are indexed; the 6
+  missing are spread one-per-case, and 14/16 cases have at least one relevant hit
+  in the top 10.
+
 ### Still open — retrieval
 
 - [ ] **C. Prompt/budget tuning** so the model reaches for `fetch_arxiv` early and
   stops spamming redundant `search_papers`. Band-aid on top of A; lower priority now
   that A+B are in.
-- [ ] **Verify/fix the SPECTER2 adapter activation** — the "adapters available but
-  none are activated" / "Could not identify valid prediction head(s)" warnings fire
-  on both document and query embeds, so scores are compressed (on- and off-topic
-  both ~0.71) and only ranking is reliable. This is why the 0.75 backfill floor
-  currently behaves as "always backfill". Fixing the adapter is the prerequisite for
-  making the score floor discriminative; retune the floor afterward.
 - [ ] **Live end-to-end re-test** of the quantization question on the warm corpus to
   confirm a genuinely grounded memo (backend proven; the paid live run was not
   repeated this session).

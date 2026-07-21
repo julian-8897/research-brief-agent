@@ -94,12 +94,17 @@ class Settings:
     # results and choose `fetch_arxiv` itself. Deduped per distinct query per run
     # and bounded by SEARCH_BACKFILL_MAX_PAPERS. Adds one arXiv round-trip on the
     # first search of an uncovered topic; set AGENT_SEARCH_AUTO_BACKFILL=false to
-    # rely solely on the indexed corpus. The floor is SPECTER2 cosine similarity;
-    # 0.75 treats a best local hit below that as "topic not covered". Retune if
-    # the query-adapter activation changes typical score magnitudes.
+    # rely solely on the indexed corpus. The floor is SPECTER2 cosine similarity.
+    # Calibrated 2026-07-21 against the seeded benchmark corpus (see
+    # scripts/calibrate_backfill_floor.py): best-hit cosines for covered topics
+    # measured 0.7318-0.8162, while an uncovered topic's best off-topic hits
+    # measured ~0.71-0.73. 0.72 sits below the whole covered band with a small
+    # margin; the bands are close because SPECTER2 cosines are compressed, so
+    # treat the floor as a weak instrument and re-run the calibration if the
+    # embedding model or corpus mix changes.
     agent_search_auto_backfill: bool = _bool_env("AGENT_SEARCH_AUTO_BACKFILL", True)
     agent_search_backfill_min_score: float = _float_env(
-        "AGENT_SEARCH_BACKFILL_MIN_SCORE", 0.75
+        "AGENT_SEARCH_BACKFILL_MIN_SCORE", 0.72
     )
 
     # Transcript compaction: each provider turn must include the prior
