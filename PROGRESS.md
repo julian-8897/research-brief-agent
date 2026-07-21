@@ -40,12 +40,12 @@ un-useful today.** Findings, with run evidence:
   query side, which would degrade all retrieval relevance and could be contributing
   to the mediocre ~0.71 scores. Needs direct verification (confirm the adapter is
   applied and the query embedding differs from the base-adapter embedding).
-- **Minor UX fix landed (uncommitted).** The console's "Domain" field defaulted to
+- **Minor UX fix landed.** The console's "Domain" field defaulted to
   `cs.LG`, which read as a required arXiv-category picker; in the live agent path
   `domain` is only injected into the prompt as free text (the category-filter code
   path, `ResearchTools.arxiv_metadata_search`, has no live callers). Changed
   `static/index.html` to an optional field with a plain-English placeholder. Markup
-  only; backend untouched.
+  only; backend untouched. Committed on `retrieval-usefulness`.
 
 ### P0 retrieval usefulness — A + B landed 2026-07-21
 
