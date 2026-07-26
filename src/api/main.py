@@ -260,7 +260,10 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
             services.settings.rate_limit_requests,
             services.settings.rate_limit_window_seconds,
         )
-        yield
+        try:
+            yield
+        finally:
+            services.tracer.flush()
 
     service_app = FastAPI(
         title="Research Brief Agent",

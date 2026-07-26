@@ -46,12 +46,68 @@ class FakeLangfuse:
         return trace
 
 
+class FakeV4Span:
+    def __init__(self, name, input=None, metadata=None, trace_id="trace-v4"):
+        self.name = name
+        self.input = input
+        self.metadata = metadata
+        self.trace_id = trace_id
+        self.children: list[FakeV4Span] = []
+        self.output = None
+        self.end_count = 0
+
+    def start_observation(self, name, as_type="span", metadata=None):
+        child = FakeV4Span(name, metadata=metadata, trace_id=self.trace_id)
+        self.children.append(child)
+        return child
+
+    def update(self, metadata=None, output=None):
+        if metadata is not None:
+            self.metadata = metadata
+        if output is not None:
+            self.output = output
+
+    def end(self):
+        self.end_count += 1
+
+
+class FakeLangfuseV4:
+    instances: list["FakeLangfuseV4"] = []
+
+    def __init__(self, public_key, secret_key, base_url=None):
+        self.public_key = public_key
+        self.secret_key = secret_key
+        self.base_url = base_url
+        self.roots: list[FakeV4Span] = []
+        self.flush_count = 0
+        FakeLangfuseV4.instances.append(self)
+
+    def start_observation(self, name, as_type="span", input=None):
+        root = FakeV4Span(name, input=input)
+        self.roots.append(root)
+        return root
+
+    def get_trace_url(self, trace_id=None):
+        return f"https://langfuse.example/trace/{trace_id}"
+
+    def flush(self):
+        self.flush_count += 1
+
+
 def _install_fake_langfuse(monkeypatch):
     module = ModuleType("langfuse")
     module.Langfuse = FakeLangfuse
     monkeypatch.setitem(sys.modules, "langfuse", module)
     FakeLangfuse.instances.clear()
     return FakeLangfuse
+
+
+def _install_fake_langfuse_v4(monkeypatch):
+    module = ModuleType("langfuse")
+    module.Langfuse = FakeLangfuseV4
+    monkeypatch.setitem(sys.modules, "langfuse", module)
+    FakeLangfuseV4.instances.clear()
+    return FakeLangfuseV4
 
 
 def test_tracer_noops_without_keys():
@@ -96,6 +152,40 @@ def test_tracer_creates_trace_and_records_spans(monkeypatch):
     assert trace.spans[0].ended_with is not None
     assert trace.spans[0].ended_with["tool"] == "search_papers"
     assert "latency_ms" in trace.spans[0].ended_with
+
+
+def test_tracer_uses_v4_observations_finishes_and_flushes(monkeypatch):
+    fake = _install_fake_langfuse_v4(monkeypatch)
+    tracer = Tracer(
+        Settings(
+            langfuse_public_key="pk",
+            langfuse_secret_key="sk",
+            langfuse_host="https://langfuse.example",
+        )
+    )
+
+    client = fake.instances[0]
+    assert client.base_url == "https://langfuse.example"
+
+    context = tracer.start("run", {"q": "x"})
+    assert context.trace_url == "https://langfuse.example/trace/trace-v4"
+
+    with tracer.span(context, "tool", tool="search_papers"):
+        pass
+
+    root = client.roots[0]
+    child = root.children[0]
+    assert child.metadata["tool"] == "search_papers"
+    assert child.metadata["latency_ms"] >= 0
+    assert child.end_count == 1
+
+    tracer.finish(context, {"status": "completed"})
+    tracer.finish(context, {"status": "duplicate"})
+    assert root.output == {"status": "completed"}
+    assert root.end_count == 1
+
+    tracer.flush()
+    assert client.flush_count == 1
 
 
 def test_tracer_survives_client_construction_failure(monkeypatch):

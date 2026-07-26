@@ -157,7 +157,9 @@ class Settings:
 
     langfuse_public_key: str | None = os.getenv("LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: str | None = os.getenv("LANGFUSE_SECRET_KEY")
-    langfuse_host: str | None = os.getenv("LANGFUSE_HOST")
+    langfuse_host: str | None = _optional_env(
+        "LANGFUSE_BASE_URL", _optional_env("LANGFUSE_HOST")
+    )
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     structured_logs: bool = _bool_env("STRUCTURED_LOGS", True)
     run_records_dir: str | None = _optional_env("RUN_RECORDS_DIR", ".local/run-records")

@@ -2,7 +2,24 @@
 
 Living status tracker for Research Brief Agent. Update this as work lands.
 
-_Last updated: 2026-07-21_
+_Last updated: 2026-07-26_
+
+## Langfuse SDK compatibility (2026-07-26)
+
+- [x] Updated the tracing wrapper for the installed Langfuse 4 SDK while retaining
+  compatibility with the legacy trace API.
+- [x] Agent runs now end their root observation with the final brief payload, and
+  application shutdown flushes queued observations.
+- [x] `LANGFUSE_BASE_URL` is the documented endpoint setting; the deprecated
+  `LANGFUSE_HOST` remains accepted as a fallback.
+- [x] Added regression coverage for Langfuse 4 root observations, child spans,
+  idempotent finalisation, trace URLs, and flushing.
+- [ ] Add local Langfuse project credentials and capture a real uploaded trace.
+  Blocked only on `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`; neither is
+  currently configured.
+
+**Verification:** `uv run pytest -q` → 148 passed; `ruff check` and
+`ruff format --check` clean.
 
 ## Live product review (2026-07-21) — retrieval usefulness gap
 

@@ -307,6 +307,7 @@ class ResearchBriefAgent:
             langfuse_trace_url=trace.trace_url,
             warnings=warnings,
         )
+        self.tracer.finish(trace, response.model_dump(mode="json"))
         yield {"event": "final", "data": response.model_dump(mode="json")}
 
     def _run_llm_turn(
@@ -773,6 +774,7 @@ class ResearchBriefAgent:
             langfuse_trace_url=trace.trace_url,
             warnings=warnings,
         )
+        self.tracer.finish(trace, response.model_dump(mode="json"))
         yield {"event": "final", "data": response.model_dump(mode="json")}
 
     def _fallback_brief(
