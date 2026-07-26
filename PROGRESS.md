@@ -25,13 +25,21 @@ _Last updated: 2026-07-26_
 - [x] Removed arXiv reading tools after web-only discovery and added a
   tools-disabled retry when an OpenAI-compatible provider emits tool-call markup
   instead of the final memo.
+- [x] Added a `Web fetch` readiness indicator to the UI health strip. Existing
+  timeline, evidence and diagnostics views expose each `web_search` call,
+  separate web citations, result/failure counts and Exa cost.
+- [x] Langfuse `tool:web_search` observations now capture query arguments,
+  parsed source output, returned count, Exa cost, latency and error metadata.
 
 **Verification:** `uv run pytest -q` → 185 passed; `ruff check` and
 `ruff format --check` clean; browser JavaScript syntax passed; the hermetic
 seven-case core quality gate passed. A live Quick run used one Exa call, returned
 five sources, cited four canonical web sources, produced no full-text errors,
 and completed in 27.2 s. Measured costs were $0.007 Exa and $0.00201 LLM; the
-Langfuse trace was emitted.
+Langfuse trace was emitted. A second live visibility run confirmed the UI stream
+reported `web_search_available: true` and Langfuse stored one
+`tool:web_search` span with the query, five parsed sources, $0.007 Exa cost and
+1.84 s tool latency.
 
 ## Recency candidate-lane correction (2026-07-26)
 

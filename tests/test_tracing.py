@@ -163,7 +163,10 @@ def test_tracer_noops_without_keys():
     with tracer.span(context, "turn", turn=1):
         pass
     assert context.spans[-1]["name"] == "turn"
-    assert context.spans[-1]["metadata"] == {"turn": 1}
+    assert context.spans[-1]["metadata"]["turn"] == 1
+    assert context.spans[-1]["metadata"]["latency_ms"] >= 0
+    assert context.spans[-1]["input"] is None
+    assert context.spans[-1]["output"] is None
     assert context.spans[-1]["latency_ms"] >= 0
 
 
@@ -213,13 +216,27 @@ def test_tracer_uses_v4_observations_finishes_and_flushes(monkeypatch):
     context = tracer.start("run", {"q": "x"})
     assert context.trace_url == "https://langfuse.example/trace/trace-v4"
 
-    with tracer.span(context, "tool", tool="search_papers"):
-        pass
+    with tracer.span(
+        context,
+        "tool:web_search",
+        input_payload={"arguments": {"query": "latest coding models"}},
+        tool="web_search",
+    ) as span:
+        span.update(
+            output={"sources": [{"id": "web-1"}]},
+            returned=1,
+            estimated_cost_usd=0.007,
+        )
 
     root = client.roots[0]
     child = root.children[0]
-    assert child.metadata["tool"] == "search_papers"
+    assert child.name == "tool:web_search"
+    assert child.metadata["tool"] == "web_search"
+    assert child.metadata["returned"] == 1
+    assert child.metadata["estimated_cost_usd"] == 0.007
     assert child.metadata["latency_ms"] >= 0
+    assert child.input == {"arguments": {"query": "latest coding models"}}
+    assert child.output == {"sources": [{"id": "web-1"}]}
     assert child.end_count == 1
 
     tracer.finish(context, {"status": "completed"})
@@ -304,4 +321,5 @@ def test_tracer_survives_trace_and_span_failures(monkeypatch):
     with tracer.span(context, "turn", turn=2):
         pass
     assert context.spans[-1]["name"] == "turn"
-    assert context.spans[-1]["metadata"] == {"turn": 2}
+    assert context.spans[-1]["metadata"]["turn"] == 2
+    assert context.spans[-1]["metadata"]["latency_ms"] >= 0

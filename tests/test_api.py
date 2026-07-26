@@ -164,6 +164,8 @@ def test_index_includes_responsive_markdown_table_rendering():
     assert "data.cited_web_sources || []" in response.text
     assert "Current web sources" in response.text
     assert "web_search_diagnostics" in response.text
+    assert 'id="health-web"' in response.text
+    assert "Web fetch" in response.text
     assert "overflow-x: auto" in response.text
 
 

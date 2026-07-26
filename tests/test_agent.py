@@ -64,6 +64,13 @@ class ScriptedProvider:
         )
 
 
+class CapturingTracer(Tracer):
+    def start(self, name, input_payload):
+        context = super().start(name, input_payload)
+        self.last_context = context
+        return context
+
+
 class FailingProvider:
     name = "fake"
     model = "fake-model"
@@ -1039,7 +1046,8 @@ def test_recency_run_uses_bounded_web_evidence_and_separate_citations(monkeypatc
             },
         ]
     )
-    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+    tracer = CapturingTracer(settings)
+    agent = ResearchBriefAgent(settings, tools, tracer, llm=provider)
 
     response = agent.run(
         BriefRequest(
@@ -1059,6 +1067,15 @@ def test_recency_run_uses_bounded_web_evidence_and_separate_citations(monkeypatc
     assert response.web_search_diagnostics.estimated_cost_usd == 0.004
     assert response.retrieval_diagnostics.freshness_source == "arxiv+web"
     assert any("bounded allow-list" in warning for warning in response.warnings)
+    web_span = next(
+        span for span in tracer.last_context.spans if span["name"] == "tool:web_search"
+    )
+    assert web_span["input"]["arguments"]["query"] == (
+        "official latest coding model benchmarks"
+    )
+    assert web_span["output"]["sources"][0]["citation"] == "[web-1]"
+    assert web_span["metadata"]["returned"] == 1
+    assert web_span["metadata"]["estimated_cost_usd"] == 0.004
 
 
 def test_web_search_tool_is_hidden_for_non_recency_questions():

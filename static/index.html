@@ -1172,6 +1172,13 @@
             <div class="readout">
               <span class="readout-lamp"></span>
               <div class="readout-meta">
+                <span class="readout-label">Web fetch</span>
+                <strong id="health-web">-</strong>
+              </div>
+            </div>
+            <div class="readout">
+              <span class="readout-lamp"></span>
+              <div class="readout-meta">
                 <span class="readout-label">Trace</span>
                 <strong id="health-trace">-</strong>
               </div>
@@ -1325,6 +1332,7 @@ Track latency, cost, and operational risks.</textarea>
         healthStore: $("#health-store"),
         healthPapers: $("#health-papers"),
         healthLlm: $("#health-llm"),
+        healthWeb: $("#health-web"),
         healthTrace: $("#health-trace"),
         briefForm: $("#brief-form"),
         briefSubmit: $("#brief-submit"),
@@ -1513,15 +1521,24 @@ Track latency, cost, and operational risks.</textarea>
           state.health = payload;
           const vectorStore = payload.vector_store || {};
           const llm = payload.llm_provider || {};
+          const webSearch = payload.web_search || {};
           const statusTone = payload.ready ? "live" : "warn";
           const storeTone = vectorStore.status === "error" ? "down" : vectorStore.fallback ? "warn" : "live";
           const papersTone = Number.isFinite(payload.papers_indexed) ? "live" : "warn";
           const llmTone = llm.key_present ? "live" : "warn";
+          const webTone = webSearch.status === "configured" ? "live" : "warn";
+          const webLabel =
+            webSearch.status === "configured"
+              ? webSearch.provider || "on"
+              : webSearch.status === "disabled"
+                ? "off"
+                : "missing key";
 
           setReadout(elements.healthStatus, payload.status || (response.ok ? "ok" : "degraded"), statusTone);
           setReadout(elements.healthStore, payload.retrieval_backend || "-", storeTone);
           setReadout(elements.healthPapers, String(payload.papers_indexed ?? "-"), papersTone);
           setReadout(elements.healthLlm, llm.provider || "-", llmTone);
+          setReadout(elements.healthWeb, webLabel, webTone);
           setReadout(elements.healthTrace, payload.langfuse_enabled ? "on" : "off", payload.langfuse_enabled ? "live" : "warn");
         } catch (error) {
           state.health = null;
@@ -1529,6 +1546,7 @@ Track latency, cost, and operational risks.</textarea>
           setReadout(elements.healthStore, "-", "down");
           setReadout(elements.healthPapers, "-", "down");
           setReadout(elements.healthLlm, "-", "down");
+          setReadout(elements.healthWeb, "-", "down");
           setReadout(elements.healthTrace, "-", "down");
         }
       }

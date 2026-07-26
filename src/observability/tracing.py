@@ -37,6 +37,21 @@ class GenerationRecord:
         self.metadata.update(metadata)
 
 
+@dataclass
+class SpanRecord:
+    output: dict[str, Any] | list[Any] | str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def update(
+        self,
+        *,
+        output: dict[str, Any] | list[Any] | str | None = None,
+        **metadata: Any,
+    ) -> None:
+        self.output = output
+        self.metadata.update(metadata)
+
+
 class Tracer:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -79,35 +94,80 @@ class Tracer:
         return context
 
     @contextmanager
-    def span(self, context: TraceContext, name: str, **metadata: Any) -> Iterator[None]:
+    def span(
+        self,
+        context: TraceContext,
+        name: str,
+        *,
+        input_payload: dict[str, Any] | None = None,
+        **metadata: Any,
+    ) -> Iterator[SpanRecord]:
         started = time.perf_counter()
         span = None
+        record = SpanRecord()
         if context.root is not None:
             try:
                 if hasattr(context.root, "start_observation"):
                     span = context.root.start_observation(
                         name=name,
                         as_type="span",
+                        input=input_payload,
                         metadata=metadata,
                     )
                 else:
-                    span = context.root.span(name=name, metadata=metadata)
+                    try:
+                        span = context.root.span(
+                            name=name,
+                            input=input_payload,
+                            metadata=metadata,
+                        )
+                    except TypeError:
+                        span = context.root.span(
+                            name=name,
+                            metadata={**metadata, "input": input_payload},
+                        )
             except Exception:
                 span = None
         try:
-            yield
+            yield record
+        except Exception as exc:
+            record.update(
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            raise
         finally:
             latency_ms = (time.perf_counter() - started) * 1000
+            final_metadata = {
+                **metadata,
+                **record.metadata,
+                "latency_ms": latency_ms,
+            }
             context.spans.append(
-                {"name": name, "latency_ms": latency_ms, "metadata": metadata}
+                {
+                    "name": name,
+                    "latency_ms": latency_ms,
+                    "metadata": final_metadata,
+                    "input": input_payload,
+                    "output": record.output,
+                }
             )
             if span is not None:
                 try:
                     if hasattr(span, "update"):
-                        span.update(metadata={**metadata, "latency_ms": latency_ms})
+                        span.update(
+                            output=record.output,
+                            metadata=final_metadata,
+                        )
                         span.end()
                     else:
-                        span.end(metadata={**metadata, "latency_ms": latency_ms})
+                        try:
+                            span.end(
+                                output=record.output,
+                                metadata=final_metadata,
+                            )
+                        except TypeError:
+                            span.end(metadata=final_metadata)
                 except Exception:
                     pass
 

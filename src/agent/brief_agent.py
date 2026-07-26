@@ -248,8 +248,18 @@ class ResearchBriefAgent:
                         )
                         meta = {"blocked": True}
                     else:
-                        with self.tracer.span(trace, f"tool:{call.name}"):
+                        with self.tracer.span(
+                            trace,
+                            f"tool:{call.name}",
+                            input_payload={"arguments": call.arguments},
+                            tool=call.name,
+                        ) as tool_span:
                             content, meta = self._call_tool(toolset, call)
+                            try:
+                                traced_output = json.loads(content)
+                            except (TypeError, json.JSONDecodeError):
+                                traced_output = content
+                            tool_span.update(output=traced_output, **meta)
                     usage.tool_call_count += 1
                     results.append(ToolResult(call.id, content))
                     yield {"event": "tool_result", "name": call.name, **meta}
