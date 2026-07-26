@@ -4,6 +4,19 @@ Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-07-26_
 
+## Memo table rendering (2026-07-26)
+
+- [x] Added Markdown table parsing to the browser UI so comparison tables render as
+  semantic headers and cells instead of exposed pipe syntax.
+- [x] Added compact paper-surface table styling, alternating rows, and horizontal
+  overflow for narrow screens.
+- [x] Added API-page regression coverage and directly exercised the JavaScript
+  renderer with a representative trade-offs table.
+
+**Verification:** `uv run pytest -q` → 149 passed; `ruff check` and
+`ruff format --check` clean; JavaScript syntax and table-render fixture passed; the
+live Qdrant-backed service serves the updated parser at `http://127.0.0.1:8000`.
+
 ## Live local quality verification (2026-07-26)
 
 - [x] Verified the browser-facing service over HTTP with the embedded warm Qdrant

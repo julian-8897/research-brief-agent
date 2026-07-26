@@ -920,6 +920,53 @@
         margin: 0 0 12px;
       }
 
+      .memo-table-wrap {
+        margin: 14px 0 18px;
+        overflow-x: auto;
+        border: 1px solid var(--paper-line);
+        border-radius: 8px;
+        background: var(--paper);
+      }
+
+      .memo table {
+        width: 100%;
+        min-width: 620px;
+        border-collapse: collapse;
+        font-family: var(--sans);
+        font-size: 13.5px;
+        line-height: 1.45;
+      }
+
+      .memo th,
+      .memo td {
+        padding: 10px 12px;
+        text-align: left;
+        vertical-align: top;
+        border-right: 1px solid var(--paper-line);
+        border-bottom: 1px solid var(--paper-line);
+      }
+
+      .memo th {
+        background: var(--paper-2);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.025em;
+        color: var(--paper-ink);
+      }
+
+      .memo tbody tr:nth-child(even) {
+        background: color-mix(in srgb, var(--paper-2) 48%, transparent);
+      }
+
+      .memo th:last-child,
+      .memo td:last-child {
+        border-right: 0;
+      }
+
+      .memo tbody tr:last-child td {
+        border-bottom: 0;
+      }
+
       .memo a {
         color: var(--paper-link);
         text-decoration: underline;
@@ -1314,6 +1361,35 @@ Track latency, cost, and operational risks.</textarea>
           .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
       }
 
+      function splitTableRow(line) {
+        const content = String(line).trim().replace(/^\|/, "").replace(/\|$/, "");
+        const cells = [];
+        let cell = "";
+        let escaped = false;
+
+        for (const character of content) {
+          if (escaped) {
+            cell += character;
+            escaped = false;
+          } else if (character === "\\") {
+            escaped = true;
+          } else if (character === "|") {
+            cells.push(cell.trim());
+            cell = "";
+          } else {
+            cell += character;
+          }
+        }
+        if (escaped) cell += "\\";
+        cells.push(cell.trim());
+        return cells;
+      }
+
+      function isTableSeparator(line, columnCount) {
+        const cells = splitTableRow(line);
+        return cells.length === columnCount && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+      }
+
       function renderMarkdown(text) {
         const lines = String(text || "").split(/\r?\n/);
         const html = [];
@@ -1326,13 +1402,46 @@ Track latency, cost, and operational risks.</textarea>
           }
         }
 
-        for (const rawLine of lines) {
-          const line = rawLine.trim();
+        for (let index = 0; index < lines.length; index += 1) {
+          const line = lines[index].trim();
           if (!line) {
             closeList();
             continue;
           }
-          if (line.startsWith("### ")) {
+
+          const headerCells = splitTableRow(line);
+          const separator = lines[index + 1]?.trim() || "";
+          const isTable =
+            line.includes("|") &&
+            headerCells.length > 1 &&
+            isTableSeparator(separator, headerCells.length);
+
+          if (isTable) {
+            closeList();
+            const rows = [];
+            let rowIndex = index + 2;
+
+            while (rowIndex < lines.length) {
+              const rowLine = lines[rowIndex].trim();
+              if (!rowLine || !rowLine.includes("|")) break;
+              const cells = splitTableRow(rowLine);
+              if (cells.length !== headerCells.length) break;
+              rows.push(cells);
+              rowIndex += 1;
+            }
+
+            const head = headerCells.map((cell) => `<th scope="col">${inlineMarkdown(cell)}</th>`).join("");
+            const body = rows
+              .map(
+                (cells) =>
+                  `<tr>${cells.map((cell) => `<td>${inlineMarkdown(cell)}</td>`).join("")}</tr>`,
+              )
+              .join("");
+            html.push(
+              `<div class="memo-table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`,
+            );
+            index = rowIndex - 1;
+          } else if (line.startsWith("### ")) {
             closeList();
             html.push(`<h3>${inlineMarkdown(line.slice(4))}</h3>`);
           } else if (line.startsWith("## ")) {

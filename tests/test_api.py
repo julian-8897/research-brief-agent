@@ -137,6 +137,19 @@ def _client_with_arxiv_client(arxiv_client):
     return TestClient(app)
 
 
+def test_index_includes_responsive_markdown_table_rendering():
+    with _client() as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "function splitTableRow(line)" in response.text
+    assert "function isTableSeparator(line, columnCount)" in response.text
+    assert '<div class="memo-table-wrap"><table>' in response.text
+    assert ".memo-table-wrap" in response.text
+    assert "overflow-x: auto" in response.text
+
+
 def test_health_endpoint():
     with _client() as client:
         response = client.get("/health")
