@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 
 from src.agent import ResearchBriefAgent, ResearchTools
@@ -356,6 +358,115 @@ def test_discovery_tools_withdrawn_after_search_budget(monkeypatch):
     assert provider.offered_tool_names[1] == ["get_full_text"]
     assert provider.offered_tool_names[2] == ["get_full_text"]
     assert provider.offered_tool_names[3] == ["get_paper_details", "get_full_text"]
+
+
+def test_research_depth_presets_respect_server_hard_limit():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_quick_search_calls=1,
+        agent_max_search_calls=3,
+        agent_deep_search_calls=5,
+        agent_search_calls_hard_limit=4,
+    )
+    tools = ResearchTools(
+        settings, FakeArxivClient(), FakeEmbedder(), _store_with_paper()
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=FailingProvider())
+
+    assert (
+        agent._discovery_call_budget(
+            BriefRequest(
+                research_question="Quick research depth test?", research_depth="quick"
+            )
+        )
+        == 1
+    )
+    assert (
+        agent._discovery_call_budget(
+            BriefRequest(
+                research_question="Balanced research depth test?",
+                research_depth="balanced",
+            )
+        )
+        == 3
+    )
+    assert (
+        agent._discovery_call_budget(
+            BriefRequest(
+                research_question="Deep research depth test?", research_depth="deep"
+            )
+        )
+        == 4
+    )
+
+
+def test_quick_depth_blocks_parallel_discovery_calls_beyond_budget(monkeypatch):
+    monkeypatch.setattr(
+        "src.agent.toolset.fetch_arxiv_fulltext",
+        lambda pdf_url, *, timeout, char_budget, **kwargs: ("FULL BODY TEXT", False),
+    )
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_search_auto_backfill=False,
+    )
+    tools = ResearchTools(
+        settings, FakeArxivClient(), FakeEmbedder(), _store_with_paper()
+    )
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="search-1",
+                        name="search_papers",
+                        arguments={"query": "retrieval grounding", "k": 1},
+                    ),
+                    ToolCall(
+                        id="search-2",
+                        name="search_papers",
+                        arguments={"query": "citation grounding", "k": 1},
+                    ),
+                    ToolCall(
+                        id="fetch-1",
+                        name="fetch_arxiv",
+                        arguments={"query": "retrieval", "max_results": 1},
+                    ),
+                ]
+            },
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="fulltext",
+                        name="get_full_text",
+                        arguments={"paper_ids": ["2401.00001"]},
+                    )
+                ]
+            },
+            {"text": "# Decision Memo\n\nGrounded [2401.00001]."},
+        ]
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    response = agent.run(
+        BriefRequest(
+            research_question="How should retrieval grounding be implemented?",
+            research_depth="quick",
+            max_papers=1,
+        )
+    )
+
+    second_search = json.loads(
+        _tool_result_content(provider.messages_seen[1], "search-2")
+    )
+    blocked_fetch = json.loads(
+        _tool_result_content(provider.messages_seen[1], "fetch-1")
+    )
+    assert second_search["error"] == "discovery budget exhausted"
+    assert blocked_fetch["error"] == "discovery budget exhausted"
+    assert provider.offered_tool_names[1] == ["get_full_text"]
+    assert response.token_cost_estimate.tool_call_count == 4
 
 
 def test_agent_blocks_final_until_full_text_read(monkeypatch):

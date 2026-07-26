@@ -106,7 +106,13 @@ class ResearchBriefAgent:
     def _iterate(self, request: BriefRequest) -> Iterator[dict[str, Any]]:
         started = time.perf_counter()
         trace = self.tracer.start("research_brief", request.model_dump(mode="json"))
-        yield {"event": "started", "message": "Research brief run started"}
+        discovery_budget = self._discovery_call_budget(request)
+        yield {
+            "event": "started",
+            "message": "Research brief run started",
+            "research_depth": request.research_depth,
+            "discovery_budget": discovery_budget,
+        }
 
         if self.llm is None:
             yield from self._iterate_fallback(request, trace, started)
@@ -131,7 +137,7 @@ class ResearchBriefAgent:
         warnings: list[str] = []
         final_text: str | None = None
         discovery_calls = 0
-        discovery_budget_reached = self.settings.agent_max_search_calls <= 0
+        discovery_budget_reached = discovery_budget <= 0
         discovery_budget_event_emitted = False
         system = self._system_prompt(request)
         messages: list[Message] = [UserMessage(self._user_prompt(request))]
@@ -182,14 +188,30 @@ class ResearchBriefAgent:
                 results: list[ToolResult] = []
                 for call in turn.tool_calls:
                     is_discovery_call = call.name in _DISCOVERY_TOOLS
-                    if is_discovery_call:
+                    discovery_call_blocked = (
+                        is_discovery_call and discovery_calls >= discovery_budget
+                    )
+                    if is_discovery_call and not discovery_call_blocked:
                         discovery_calls += 1
                     yield {
                         "event": "tool_call",
                         "name": call.name,
                         "arguments": call.arguments,
                     }
-                    if call.name not in offered_tool_names:
+                    if discovery_call_blocked:
+                        content = json.dumps(
+                            {
+                                "error": "discovery budget exhausted",
+                                "research_depth": request.research_depth,
+                                "discovery_budget": discovery_budget,
+                                "hint": self._discovery_budget_nudge(toolset),
+                            }
+                        )
+                        meta = {
+                            "blocked": True,
+                            "reason": "discovery_budget_exhausted",
+                        }
+                    elif call.name not in offered_tool_names:
                         content = json.dumps(
                             {
                                 "error": "tool not available",
@@ -207,7 +229,7 @@ class ResearchBriefAgent:
                     yield {"event": "tool_result", "name": call.name, **meta}
                 messages.append(ToolResultsMessage(results))
 
-                if discovery_calls >= self.settings.agent_max_search_calls:
+                if discovery_calls >= discovery_budget:
                     discovery_budget_reached = True
                     if not discovery_budget_event_emitted:
                         messages.append(
@@ -541,6 +563,17 @@ class ResearchBriefAgent:
         required = min(_MIN_FULL_TEXT_PAPERS, toolset.retrieved_count)
         return required > 0 and toolset.fulltext_success_count < required
 
+    def _discovery_call_budget(self, request: BriefRequest) -> int:
+        requested = {
+            "quick": self.settings.agent_quick_search_calls,
+            "balanced": self.settings.agent_max_search_calls,
+            "deep": self.settings.agent_deep_search_calls,
+        }[request.research_depth]
+        return max(
+            0,
+            min(requested, max(0, self.settings.agent_search_calls_hard_limit)),
+        )
+
     @staticmethod
     def _discovery_budget_nudge(toolset: ResearchToolset) -> str:
         candidate_ids = toolset.candidate_ids(limit=3)
@@ -848,7 +881,7 @@ class ResearchBriefAgent:
 
     def _system_prompt(self, request: BriefRequest) -> str:
         brief_title = _BRIEF_TITLES[request.brief_type]
-        discovery_budget = max(0, self.settings.agent_max_search_calls)
+        discovery_budget = self._discovery_call_budget(request)
         full_text_budget = max(
             0,
             min(
@@ -914,6 +947,7 @@ class ResearchBriefAgent:
             f"Domain: {request.domain or 'unspecified'}\n"
             f"Constraints (binding unless they conflict with evidence integrity or "
             f"tool limits):\n{constraints}\n"
+            f"Research depth: {request.research_depth}.\n"
             f"Target papers to consider: up to {request.max_papers}."
         )
 

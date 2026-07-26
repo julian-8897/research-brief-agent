@@ -50,6 +50,7 @@ class BriefRequest(BaseModel):
     brief_type: Literal["decision_memo", "technical_brief", "literature_scan"] = (
         "decision_memo"
     )
+    research_depth: Literal["quick", "balanced", "deep"] = "balanced"
 
 
 class SearchResponseItem(BaseModel):

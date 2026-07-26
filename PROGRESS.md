@@ -4,6 +4,22 @@ Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-07-26_
 
+## User-selectable research depth (2026-07-26)
+
+- [x] Added `quick`, `balanced`, and `deep` request modes, defaulting to 1, 3,
+  and 5 discovery calls.
+- [x] Added a configurable server-side hard limit and preserved
+  `AGENT_MAX_SEARCH_CALLS` as the existing Balanced preset.
+- [x] Enforced the limit per tool call, including multiple discovery requests
+  emitted in one model turn.
+- [x] Added the Research depth control to the browser UI with latency/cost
+  guidance; the start event reports the effective capped budget.
+- [x] Kept recency backfill inside an allowed search call and left Max sources
+  as a separate evidence-breadth control.
+
+**Verification:** `uv run pytest -q` → 174 passed; `ruff check` and
+`ruff format --check` clean; browser JavaScript syntax passed.
+
 ## Recency-aware retrieval (2026-07-26)
 
 - [x] Added deterministic recency-intent detection across the question, domain,

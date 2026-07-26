@@ -156,6 +156,11 @@ def test_index_includes_responsive_markdown_table_rendering():
     assert "function isTableSeparator(line, columnCount)" in response.text
     assert '<div class="memo-table-wrap"><table>' in response.text
     assert ".memo-table-wrap" in response.text
+    assert 'id="research-depth"' in response.text
+    assert '<option value="quick">Quick · 1 search</option>' in response.text
+    assert '<option value="balanced" selected>' in response.text
+    assert '<option value="deep">Deep · 5 searches</option>' in response.text
+    assert 'research_depth: $("#research-depth").value' in response.text
     assert "overflow-x: auto" in response.text
 
 

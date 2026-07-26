@@ -4,7 +4,7 @@ A source-grounded briefing service for AI/ML and scientific-ML engineers and res
 
 The evidence backend is scholarly literature: persistent Qdrant retrieval with SPECTER embeddings, plus on-demand arXiv backfill when the corpus is thin. Full-text PDFs are read in-process, and the agent blocks the final memo until that evidence has been read, or records a degraded run if it cannot. Citations are grounded to evidence the run actually retrieved: the model is instructed to cite only retrieved papers, and a deterministic post-filter strips any inline citation to a paper that was not retrieved (and warns), so a capable model cannot pad the memo with famous references it recalls from training. Each run reports latency and provider-measured token usage, then applies a provider-aware tariff for estimated cost. Every LLM call and tool call is traced to Langfuse, and the streaming API writes JSONL run records plus structured request/run logs.
 
-Synthesis runs against Anthropic (native Claude) or any OpenAI Chat Completions-compatible endpoint (OpenAI, local models, OpenRouter, codex/opencode-style gateways). The agent loop hands the model a catalogue of evidence tools (semantic search, arXiv backfill, abstract-level detail, full-text reading) and lets it choose which to call and in what order; turn, discovery, and tool-call budgets (`AGENT_MAX_ITERATIONS`, `AGENT_MAX_SEARCH_CALLS`, `AGENT_MAX_TOOL_CALLS`) bound latency and cost. The same tool-use layer drives both backends.
+Synthesis runs against Anthropic (native Claude) or any OpenAI Chat Completions-compatible endpoint (OpenAI, local models, OpenRouter, codex/opencode-style gateways). The agent loop hands the model a catalogue of evidence tools (semantic search, arXiv backfill, abstract-level detail, full-text reading) and lets it choose which to call and in what order. User-selectable Quick, Balanced, and Deep discovery presets plus server-side turn, discovery, and tool-call limits bound latency and cost. The same tool-use layer drives both backends.
 
 ## Architecture
 
@@ -49,16 +49,22 @@ A brief request looks like:
   "domain": "applied machine learning / AI product",
   "constraints": ["Prefer measurable citation grounding", "Track latency, cost, and operational risk"],
   "max_papers": 8,
-  "brief_type": "decision_memo"
+  "brief_type": "decision_memo",
+  "research_depth": "balanced"
 }
 ```
+
+`research_depth` accepts `quick`, `balanced`, or `deep`, corresponding by
+default to 1, 3, or 5 discovery calls. The server applies its configured hard
+limit, and blocks excess parallel discovery calls within the same model turn.
+Recency-triggered backfill happens inside an allowed search call.
 
 `POST /briefs/stream` uses one JSON object per SSE `data:` frame. Every object
 contains an `event` string, validated by `src/api/sse.py`. Stable event types:
 
 | Event | Required fields | Meaning |
 |---|---|---|
-| `started` | `message` | Run accepted and agent work started. |
+| `started` | `message` | Run accepted; also reports research depth and effective discovery budget. |
 | `retrieval_complete` | `returned`, `latency_ms` | Offline fallback retrieval finished. |
 | `llm_turn` | `turn`, `tools_requested` | One provider turn completed. |
 | `tool_call` | `name`, `arguments` | Agent is dispatching a requested tool. |
@@ -156,7 +162,7 @@ Environment variables are documented in [.env.example](.env.example). Key settin
 - `LLM_PROVIDER=anthropic|openai`, `LLM_MAX_TOKENS`, `LLM_TEMPERATURE`
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (Claude backend)
 - `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` (OpenAI-compatible backend)
-- `AGENT_MAX_ITERATIONS`, `AGENT_MAX_SEARCH_CALLS`, `AGENT_MAX_TOOL_CALLS` (agent loop budgets)
+- `AGENT_MAX_ITERATIONS`, `AGENT_MAX_TOOL_CALLS`, `AGENT_QUICK_SEARCH_CALLS`, `AGENT_MAX_SEARCH_CALLS` (Balanced), `AGENT_DEEP_SEARCH_CALLS`, `AGENT_SEARCH_CALLS_HARD_LIMIT` (agent loop and research-depth budgets)
 - `TRANSCRIPT_KEEP_RECENT_TOOL_RESULTS`, `TRANSCRIPT_FULL_TEXT_EXCERPT_CHARS`, `TRANSCRIPT_ABSTRACT_EXCERPT_CHARS` (prompt-token compaction)
 - `FULL_TEXT_CHAR_BUDGET`, `FULL_TEXT_MAX_PAPERS`, `FULL_TEXT_TOTAL_PAPER_BUDGET`, `FULL_TEXT_TIMEOUT_S` (full-text tool limits)
 - `PDF_EXTRACTOR=auto|pypdf|docling` (`auto` uses Docling when installed, then falls back to pypdf)

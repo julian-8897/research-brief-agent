@@ -95,7 +95,12 @@ class Settings:
     # brief may consume so latency and cost stay predictable.
     agent_max_iterations: int = _int_env("AGENT_MAX_ITERATIONS", 8)
     agent_max_tool_calls: int = _int_env("AGENT_MAX_TOOL_CALLS", 12)
+    # User-facing research-depth presets. The legacy AGENT_MAX_SEARCH_CALLS
+    # remains the Balanced preset so existing deployments keep their behaviour.
+    agent_quick_search_calls: int = _int_env("AGENT_QUICK_SEARCH_CALLS", 1)
     agent_max_search_calls: int = _int_env("AGENT_MAX_SEARCH_CALLS", 3)
+    agent_deep_search_calls: int = _int_env("AGENT_DEEP_SEARCH_CALLS", 5)
+    agent_search_calls_hard_limit: int = _int_env("AGENT_SEARCH_CALLS_HARD_LIMIT", 5)
 
     # Agent search auto-backfill: when the model's `search_papers` call finds no
     # local paper at or above the relevance floor, transparently fetch fresh

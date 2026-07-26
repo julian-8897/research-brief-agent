@@ -1198,13 +1198,24 @@
                     <input id="max-papers" type="number" min="1" max="50" value="6" />
                   </div>
                 </div>
-                <div>
-                  <label for="brief-type">Brief type</label>
-                  <select id="brief-type">
-                    <option value="decision_memo">Decision memo</option>
-                    <option value="technical_brief">Technical brief</option>
-                    <option value="literature_scan">Literature scan</option>
-                  </select>
+                <div class="inline-grid">
+                  <div>
+                    <label for="brief-type">Brief type</label>
+                    <select id="brief-type">
+                      <option value="decision_memo">Decision memo</option>
+                      <option value="technical_brief">Technical brief</option>
+                      <option value="literature_scan">Literature scan</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="research-depth">Research depth</label>
+                    <select id="research-depth">
+                      <option value="quick">Quick · 1 search</option>
+                      <option value="balanced" selected>Balanced · 3 searches</option>
+                      <option value="deep">Deep · 5 searches</option>
+                    </select>
+                    <div class="field-hint">Deeper runs may cost more and take longer. Server limits still apply.</div>
+                  </div>
                 </div>
                 <div>
                   <label for="constraints">Constraints</label>
@@ -1544,7 +1555,8 @@ Track latency, cost, and operational risks.</textarea>
             domain: $("#domain").value.trim() || null,
             constraints: $("#constraints").value.split("\n").map((item) => item.trim()).filter(Boolean),
             max_papers: Number($("#max-papers").value),
-            brief_type: $("#brief-type").value
+            brief_type: $("#brief-type").value,
+            research_depth: $("#research-depth").value
           };
           const response = await fetch("/briefs/stream", {
             method: "POST",
@@ -1633,7 +1645,11 @@ Track latency, cost, and operational risks.</textarea>
       }
 
       function describeEvent(eventData) {
-        if (eventData.event === "started") return eventData.message || "Run started.";
+        if (eventData.event === "started") {
+          const depth = eventData.research_depth || "balanced";
+          const budget = eventData.discovery_budget ?? "-";
+          return `${eventData.message || "Run started."}\n${depth} depth; up to ${budget} discovery calls.`;
+        }
         if (eventData.event === "llm_turn") {
           const tools = eventData.tools_requested && eventData.tools_requested.length
             ? eventData.tools_requested.join(", ")
