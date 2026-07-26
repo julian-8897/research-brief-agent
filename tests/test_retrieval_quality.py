@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -301,6 +302,43 @@ def test_search_papers_skips_backfill_when_local_hit_is_strong():
     assert arxiv_client.calls == []
     assert "backfilled" not in payload
     assert [p["id"] for p in payload["papers"]] == ["local"]
+
+
+def test_non_recency_search_keeps_semantic_ranking_even_when_lower_hit_is_newer():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_search_auto_backfill=False,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    store.upsert(
+        [
+            PaperRecord(
+                id="older-strong",
+                title="Semantically Strong",
+                summary="abstract",
+                published=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            ),
+            PaperRecord(
+                id="newer-weak",
+                title="Recent but Weaker",
+                summary="abstract",
+                published=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            ),
+        ],
+        np.array([[1.0, 0.0], [0.8, 0.6]]),
+    )
+    tools = ResearchTools(settings, object(), RecordingEmbedder(), store)
+    toolset = _backfill_toolset(
+        tools, "Which operator-learning architecture is most accurate?"
+    )
+
+    content, _meta = toolset._search_papers("operator learning accuracy", 2)
+
+    assert [paper["id"] for paper in json.loads(content)["papers"]] == [
+        "older-strong",
+        "newer-weak",
+    ]
 
 
 def test_search_papers_backfills_on_off_topic_local_hit():
