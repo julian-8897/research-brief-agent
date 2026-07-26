@@ -4,6 +4,24 @@ Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-07-26_
 
+## System prompt hardening (2026-07-26)
+
+- [x] Reduced the system prompt from 307 to 250 words while retaining the
+  agent workflow and evidence contract.
+- [x] Replaced hard-coded discovery and full-text instructions with the actual
+  per-run budgets.
+- [x] Treats paper text and all tool output as untrusted source data, not
+  instructions.
+- [x] Requires claim-level citation support, forbids factual assertions from
+  model memory, and distinguishes evidence from synthesis or inference.
+- [x] Makes user constraints binding, adds a concise default length, prohibits
+  invented dates and process commentary, and requires a complete response.
+- [x] Aligns prompts, forced synthesis, and preamble normalisation with decision
+  memos, technical briefs, and literature scans.
+
+**Verification:** `uv run pytest -q` → 165 passed; `ruff check` and
+`ruff format --check` clean.
+
 ## Cost accounting and LLM trace payloads (2026-07-26)
 
 - [x] Replaced the generic DeepSeek estimate with official V4 Flash/Pro
