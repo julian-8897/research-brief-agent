@@ -47,25 +47,68 @@ class FakeLangfuse:
 
 
 class FakeV4Span:
-    def __init__(self, name, input=None, metadata=None, trace_id="trace-v4"):
+    def __init__(
+        self,
+        name,
+        input=None,
+        metadata=None,
+        trace_id="trace-v4",
+        as_type="span",
+        model=None,
+        model_parameters=None,
+    ):
         self.name = name
         self.input = input
         self.metadata = metadata
         self.trace_id = trace_id
+        self.as_type = as_type
+        self.model = model
+        self.model_parameters = model_parameters
         self.children: list[FakeV4Span] = []
         self.output = None
+        self.usage_details = None
+        self.cost_details = None
         self.end_count = 0
 
-    def start_observation(self, name, as_type="span", metadata=None):
-        child = FakeV4Span(name, metadata=metadata, trace_id=self.trace_id)
+    def start_observation(
+        self,
+        name,
+        as_type="span",
+        input=None,
+        metadata=None,
+        model=None,
+        model_parameters=None,
+    ):
+        child = FakeV4Span(
+            name,
+            input=input,
+            metadata=metadata,
+            trace_id=self.trace_id,
+            as_type=as_type,
+            model=model,
+            model_parameters=model_parameters,
+        )
         self.children.append(child)
         return child
 
-    def update(self, metadata=None, output=None):
+    def update(
+        self,
+        metadata=None,
+        output=None,
+        usage_details=None,
+        cost_details=None,
+        model=None,
+    ):
         if metadata is not None:
             self.metadata = metadata
         if output is not None:
             self.output = output
+        if usage_details is not None:
+            self.usage_details = usage_details
+        if cost_details is not None:
+            self.cost_details = cost_details
+        if model is not None:
+            self.model = model
 
     def end(self):
         self.end_count += 1
@@ -186,6 +229,38 @@ def test_tracer_uses_v4_observations_finishes_and_flushes(monkeypatch):
 
     tracer.flush()
     assert client.flush_count == 1
+
+
+def test_tracer_records_generation_payload_usage_and_cost(monkeypatch):
+    fake = _install_fake_langfuse_v4(monkeypatch)
+    tracer = Tracer(Settings(langfuse_public_key="pk", langfuse_secret_key="sk"))
+    context = tracer.start("run", {"q": "x"})
+
+    with tracer.generation(
+        context,
+        "llm_turn",
+        input_payload={"messages": [{"role": "user", "content": "question"}]},
+        model="deepseek-v4-flash",
+        model_parameters={"temperature": 0.2},
+        turn=1,
+    ) as generation:
+        generation.update(
+            output={"text": "answer", "reasoning": "analysis"},
+            usage_details={"input": 100, "output": 20, "total": 120},
+            cost_details={"total": 0.0000196},
+            pricing_source="deepseek_official_2026-07-26",
+        )
+
+    child = fake.instances[0].roots[0].children[0]
+    assert child.as_type == "generation"
+    assert child.model == "deepseek-v4-flash"
+    assert child.input["messages"][0]["content"] == "question"
+    assert child.output == {"text": "answer", "reasoning": "analysis"}
+    assert child.usage_details == {"input": 100, "output": 20, "total": 120}
+    assert child.cost_details == {"total": 0.0000196}
+    assert child.metadata["turn"] == 1
+    assert child.metadata["pricing_source"] == "deepseek_official_2026-07-26"
+    assert child.end_count == 1
 
 
 def test_tracer_survives_client_construction_failure(monkeypatch):

@@ -40,6 +40,16 @@ def _float_env(name: str, default: float) -> float:
         raise ValueError(f"{name} must be a float") from exc
 
 
+def _optional_float_env(name: str) -> float | None:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return None
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a float") from exc
+
+
 def _csv_env(name: str) -> tuple[str, ...]:
     value = os.getenv(name)
     if not value:
@@ -193,11 +203,17 @@ class Settings:
         "RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
     )
     rerank_candidate_k: int = _int_env("RERANK_CANDIDATE_K", 40)
-    estimated_input_token_cost_per_1k: float = _float_env(
-        "ESTIMATED_INPUT_TOKEN_COST_PER_1K", 0.003
+    # Optional manual tariff overrides. When unset, recognised providers/models
+    # use the built-in tariff table and unknown endpoints use a documented
+    # generic fallback.
+    estimated_input_token_cost_per_1k: float | None = _optional_float_env(
+        "ESTIMATED_INPUT_TOKEN_COST_PER_1K"
     )
-    estimated_output_token_cost_per_1k: float = _float_env(
-        "ESTIMATED_OUTPUT_TOKEN_COST_PER_1K", 0.015
+    estimated_cached_input_token_cost_per_1k: float | None = _optional_float_env(
+        "ESTIMATED_CACHED_INPUT_TOKEN_COST_PER_1K"
+    )
+    estimated_output_token_cost_per_1k: float | None = _optional_float_env(
+        "ESTIMATED_OUTPUT_TOKEN_COST_PER_1K"
     )
 
 

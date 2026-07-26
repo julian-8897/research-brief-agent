@@ -48,6 +48,7 @@ def test_anthropic_translation_and_parsing(monkeypatch):
         captured.update(kwargs)
         return _obj(
             content=[
+                _obj(type="thinking", thinking="private analysis"),
                 _obj(type="text", text="thinking"),
                 _obj(
                     type="tool_use",
@@ -85,6 +86,7 @@ def test_anthropic_translation_and_parsing(monkeypatch):
     assert result.tool_calls[0].id == "tu1"
     assert result.tool_calls[0].arguments == {"query": "y"}
     assert (result.input_tokens, result.output_tokens) == (11, 7)
+    assert result.reasoning == "private analysis"
 
 
 def test_anthropic_tool_choice_none_keeps_tools_visible(monkeypatch):
@@ -193,10 +195,20 @@ def test_openai_deepseek_v4_disables_thinking(monkeypatch):
 
     def create(**kwargs):
         captured.update(kwargs)
-        message = _obj(content="READY - DeepSeek", tool_calls=[])
+        message = _obj(
+            content="READY - DeepSeek",
+            reasoning_content="provider reasoning",
+            tool_calls=[],
+        )
         return _obj(
             choices=[_obj(message=message)],
-            usage=_obj(prompt_tokens=19, completion_tokens=6),
+            usage=_obj(
+                prompt_tokens=19,
+                completion_tokens=6,
+                prompt_cache_hit_tokens=15,
+                prompt_cache_miss_tokens=4,
+                completion_tokens_details=_obj(reasoning_tokens=2),
+            ),
         )
 
     fake = types.ModuleType("openai")
@@ -216,3 +228,7 @@ def test_openai_deepseek_v4_disables_thinking(monkeypatch):
 
     assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
     assert result.text == "READY - DeepSeek"
+    assert result.reasoning == "provider reasoning"
+    assert result.cache_hit_input_tokens == 15
+    assert result.cache_miss_input_tokens == 4
+    assert result.reasoning_tokens == 2

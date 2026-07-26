@@ -1740,7 +1740,12 @@ Track latency, cost, and operational risks.</textarea>
           ["Full-text errors", errorSummary],
           ["Missing ids", (fullText.missing_ids || []).join(", ") || "-"],
           ["Input tokens", usage.input_tokens ?? 0],
+          ["Cached input tokens", usage.cache_hit_input_tokens ?? 0],
+          ["Uncached input tokens", usage.cache_miss_input_tokens ?? 0],
           ["Output tokens", usage.output_tokens ?? 0],
+          ["Reasoning tokens", usage.reasoning_tokens ?? 0],
+          ["Model", usage.model || "-"],
+          ["Pricing source", usage.pricing_source || "-"],
           ["Trace", traceUrl ? `<a href="${escapeHtml(traceUrl)}" target="_blank" rel="noreferrer">open trace</a>` : "-"]
         ];
         elements.diagnostics.innerHTML = rows.map(([label, value]) => `

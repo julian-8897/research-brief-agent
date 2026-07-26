@@ -4,6 +4,25 @@ Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-07-26_
 
+## Cost accounting and LLM trace payloads (2026-07-26)
+
+- [x] Replaced the generic DeepSeek estimate with official V4 Flash/Pro
+  cache-hit, cache-miss, and output tariffs, while retaining explicit environment
+  overrides and a labelled generic fallback for unknown endpoints.
+- [x] Preserved provider-measured usage across live-to-deterministic fallback and
+  set no-provider deterministic fallback cost to zero.
+- [x] Included LLM query-expansion calls in brief-level usage and cost totals.
+- [x] Recorded model calls as Langfuse generations with input transcripts, output
+  text, tool calls, provider-returned reasoning, token breakdown, model, tariff
+  source, and estimated cost.
+- [x] Exposed cache usage, reasoning tokens, model, and pricing source in API
+  responses and browser diagnostics.
+- [x] Kept DeepSeek V4 thinking disabled. A reasoning field is captured when a
+  provider returns it, but observability does not change model behaviour.
+
+**Verification:** `uv run pytest -q` → 162 passed; `ruff check` and
+`ruff format --check` clean; browser JavaScript syntax passed.
+
 ## Corpus lifecycle hardening (2026-07-26)
 
 - [x] Plain local launches now use the persistent embedded corpus configured at

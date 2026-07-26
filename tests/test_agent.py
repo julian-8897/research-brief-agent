@@ -65,6 +65,33 @@ class FailingProvider:
         raise RuntimeError("provider unavailable")
 
 
+class PartiallyFailingProvider:
+    name = "fake"
+    model = "fake-model"
+
+    def __init__(self):
+        self.turns = 0
+
+    def run_turn(self, system, messages, tools, *, tool_choice="auto"):
+        self.turns += 1
+        if self.turns == 1:
+            return TurnResult(
+                text=None,
+                tool_calls=[
+                    ToolCall(
+                        id="t1",
+                        name="search_papers",
+                        arguments={"query": "retrieval grounding", "k": 1},
+                    )
+                ],
+                input_tokens=100,
+                output_tokens=20,
+                model=self.model,
+                stop_reason="tool_calls",
+            )
+        raise RuntimeError("provider unavailable after one paid call")
+
+
 def _store_with_paper():
     store = InMemoryVectorStore(embedding_dimension=2)
     store.upsert(
@@ -104,6 +131,8 @@ def test_agent_fallback_returns_cited_brief():
     assert "Decision Memo" in response.final_brief
     assert response.cited_papers[0].id == "2401.00001"
     assert response.token_cost_estimate.llm_call_count == 0
+    assert response.token_cost_estimate.estimated_cost_usd == 0
+    assert response.token_cost_estimate.pricing_source == "offline_fallback"
 
 
 def test_agent_runs_tool_loop_and_reports_measured_usage(monkeypatch):
@@ -167,7 +196,8 @@ def test_agent_runs_tool_loop_and_reports_measured_usage(monkeypatch):
     # Token counts are summed straight from the provider turns, not estimated.
     assert usage.input_tokens == 450
     assert usage.output_tokens == 130
-    assert usage.estimated_cost_usd > 0
+    assert usage.estimated_cost_usd == 0.0033
+    assert usage.pricing_source == "generic_fallback"
     assert response.final_brief.startswith("# Decision Memo")
     assert "Now I have enough information" not in response.final_brief
     assert any(p.id == "2401.00001" for p in response.cited_papers)
@@ -421,6 +451,35 @@ def test_provider_failure_emits_error_and_degraded_before_fallback():
     final = events[-1]["data"]
     assert "deterministic fallback was used" in final["final_brief"]
     assert any("deterministic fallback" in warning for warning in final["warnings"])
+
+
+def test_provider_failure_preserves_usage_from_completed_paid_turns():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        anthropic_api_key=None,
+        openai_api_key=None,
+        agent_search_auto_backfill=False,
+    )
+    tools = ResearchTools(
+        settings, FakeArxivClient(), FakeEmbedder(), _store_with_paper()
+    )
+    provider = PartiallyFailingProvider()
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    response = agent.run(
+        BriefRequest(
+            research_question="How should retrieval systems support research briefs?",
+            max_papers=1,
+        )
+    )
+
+    usage = response.token_cost_estimate
+    assert usage.llm_call_count == 1
+    assert usage.input_tokens == 100
+    assert usage.output_tokens == 20
+    assert usage.estimated_cost_usd == 0.0006
+    assert usage.pricing_source == "generic_fallback"
 
 
 def test_agent_compacts_older_full_text_tool_results(monkeypatch):

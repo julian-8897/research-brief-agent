@@ -70,6 +70,10 @@ class TurnResult:
     output_tokens: int
     model: str
     stop_reason: str
+    reasoning: str | None = None
+    cache_hit_input_tokens: int = 0
+    cache_miss_input_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 @runtime_checkable

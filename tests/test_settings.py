@@ -1,6 +1,13 @@
 import pytest
 
-from src.settings import _bool_env, _csv_env, _float_env, _int_env, _optional_env
+from src.settings import (
+    _bool_env,
+    _csv_env,
+    _float_env,
+    _int_env,
+    _optional_env,
+    _optional_float_env,
+)
 
 
 def test_int_env_returns_default_when_unset(monkeypatch):
@@ -25,6 +32,18 @@ def test_float_env_parses_value_and_rejects_garbage(monkeypatch):
     monkeypatch.setenv("X_FLOAT", "nan-ish")
     with pytest.raises(ValueError, match="X_FLOAT must be a float"):
         _float_env("X_FLOAT", 1.0)
+
+
+def test_optional_float_env_normalises_unset_and_blank(monkeypatch):
+    monkeypatch.delenv("X_FLOAT", raising=False)
+    assert _optional_float_env("X_FLOAT") is None
+    monkeypatch.setenv("X_FLOAT", "  ")
+    assert _optional_float_env("X_FLOAT") is None
+    monkeypatch.setenv("X_FLOAT", "0.00014")
+    assert _optional_float_env("X_FLOAT") == 0.00014
+    monkeypatch.setenv("X_FLOAT", "invalid")
+    with pytest.raises(ValueError, match="X_FLOAT must be a float"):
+        _optional_float_env("X_FLOAT")
 
 
 def test_bool_env_defaults_and_truthy_spellings(monkeypatch):

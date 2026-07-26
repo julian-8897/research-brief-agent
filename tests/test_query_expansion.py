@@ -83,6 +83,26 @@ def test_expand_arxiv_query_returns_keyword_boolean_query():
     assert provider.calls == 1
 
 
+def test_expand_arxiv_query_reports_usage_to_observer():
+    provider = FakeProvider(text="neural operators OR DeepONet")
+    observed = []
+
+    expand_arxiv_query(
+        "neural operators",
+        provider,
+        on_turn=lambda name, system, messages, turn, latency_ms: observed.append(
+            (name, system, messages, turn, latency_ms)
+        ),
+    )
+
+    assert len(observed) == 1
+    name, _system, _messages, turn, latency_ms = observed[0]
+    assert name == "arxiv_query_expansion"
+    assert turn.input_tokens == 5
+    assert turn.output_tokens == 9
+    assert latency_ms >= 0
+
+
 def test_expand_arxiv_query_falls_back_without_provider():
     assert expand_arxiv_query("neural operators", None) == (
         "neural operators",

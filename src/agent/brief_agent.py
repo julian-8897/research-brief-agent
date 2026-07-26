@@ -19,6 +19,7 @@ from src.llm import (
     UserMessage,
     build_llm_provider,
 )
+from src.llm.pricing import estimate_token_cost, resolve_token_pricing
 from src.models import (
     BriefRequest,
     BriefResponse,
@@ -58,14 +59,6 @@ def _estimate_tokens(text: str) -> int:
     see :meth:`ResearchBriefAgent._run_agent_loop`.
     """
     return max(1, len(text) // 4)
-
-
-def _estimate_cost(settings: Settings, input_tokens: int, output_tokens: int) -> float:
-    return round(
-        (input_tokens / 1000 * settings.estimated_input_token_cost_per_1k)
-        + (output_tokens / 1000 * settings.estimated_output_token_cost_per_1k),
-        6,
-    )
 
 
 class ResearchBriefAgent:
@@ -109,13 +102,26 @@ class ResearchBriefAgent:
         trace = self.tracer.start("research_brief", request.model_dump(mode="json"))
         yield {"event": "started", "message": "Research brief run started"}
 
-        toolset = ResearchToolset(self.tools, request)
-
         if self.llm is None:
             yield from self._iterate_fallback(request, trace, started)
             return
 
         usage = UsageEstimate()
+        toolset = ResearchToolset(
+            self.tools,
+            request,
+            on_llm_turn=lambda name, system, messages, turn, latency_ms: (
+                self._record_auxiliary_turn(
+                    trace,
+                    usage,
+                    name,
+                    system,
+                    messages,
+                    turn,
+                    latency_ms,
+                )
+            ),
+        )
         warnings: list[str] = []
         final_text: str | None = None
         discovery_calls = 0
@@ -140,13 +146,16 @@ class ResearchBriefAgent:
                     else toolset.specs
                 )
                 offered_tool_names = {tool.name for tool in offered_tools}
-                with self.tracer.span(trace, "llm_turn", turn=turn_index):
-                    turn = self._run_llm_turn(
-                        system,
-                        self._messages_for_turn(messages),
-                        offered_tools,
-                        stage="llm_turn",
-                    )
+                turn_messages = self._messages_for_turn(messages)
+                turn = self._traced_llm_turn(
+                    trace,
+                    "llm_turn",
+                    system,
+                    turn_messages,
+                    offered_tools,
+                    stage="llm_turn",
+                    turn=turn_index,
+                )
                 self._accumulate(usage, turn)
                 yield {
                     "event": "llm_turn",
@@ -259,7 +268,12 @@ class ResearchBriefAgent:
                 "message": "Live agent failed; deterministic fallback memo will be returned.",
             }
             yield from self._iterate_fallback(
-                request, trace, started, error=str(exc), toolset=toolset
+                request,
+                trace,
+                started,
+                error=str(exc),
+                toolset=toolset,
+                live_usage=usage,
             )
             return
 
@@ -294,9 +308,7 @@ class ResearchBriefAgent:
                 retrieved=toolset.retrieved_count,
                 requested=request.max_papers,
             )
-        usage.estimated_cost_usd = _estimate_cost(
-            self.settings, usage.input_tokens, usage.output_tokens
-        )
+        self._finalise_usage(usage)
         response = BriefResponse(
             final_brief=brief,
             cited_papers=toolset.cited_papers(brief),
@@ -331,6 +343,170 @@ class ResearchBriefAgent:
                 f"LLM provider turn failed. Check provider credentials, model, "
                 f"base URL, and request limits. Original error: {exc}",
             ) from exc
+
+    def _traced_llm_turn(
+        self,
+        trace,
+        name: str,
+        system: str,
+        messages: list[Message],
+        offered_tools,
+        *,
+        stage: str,
+        tool_choice: str = "auto",
+        **metadata: Any,
+    ):
+        model = getattr(self.llm, "model", "unknown")
+        input_payload = {
+            "system": system,
+            "messages": [self._message_payload(message) for message in messages],
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                }
+                for tool in offered_tools
+            ],
+            "tool_choice": tool_choice,
+        }
+        with self.tracer.generation(
+            trace,
+            name,
+            input_payload=input_payload,
+            model=model,
+            model_parameters={
+                "max_tokens": self.settings.llm_max_tokens,
+                "temperature": self.settings.llm_temperature,
+                "tool_choice": tool_choice,
+            },
+            provider=getattr(self.llm, "name", None),
+            **metadata,
+        ) as generation:
+            turn = self._run_llm_turn(
+                system,
+                messages,
+                offered_tools,
+                stage=stage,
+                tool_choice=tool_choice,
+            )
+            pricing = resolve_token_pricing(self.settings, turn.model)
+            turn_cost = estimate_token_cost(
+                pricing,
+                input_tokens=turn.input_tokens,
+                output_tokens=turn.output_tokens,
+                cache_hit_input_tokens=turn.cache_hit_input_tokens,
+                cache_miss_input_tokens=turn.cache_miss_input_tokens,
+            )
+            generation.update(
+                output={
+                    "text": turn.text,
+                    "reasoning": turn.reasoning,
+                    "tool_calls": [
+                        {
+                            "id": call.id,
+                            "name": call.name,
+                            "arguments": call.arguments,
+                        }
+                        for call in turn.tool_calls
+                    ],
+                    "stop_reason": turn.stop_reason,
+                },
+                usage_details={
+                    "input": turn.input_tokens,
+                    "output": turn.output_tokens,
+                    "total": turn.input_tokens + turn.output_tokens,
+                    "cache_hit_input": turn.cache_hit_input_tokens,
+                    "cache_miss_input": turn.cache_miss_input_tokens,
+                    "reasoning": turn.reasoning_tokens,
+                },
+                cost_details={"total": turn_cost},
+                pricing_source=pricing.source,
+            )
+            return turn
+
+    def _record_auxiliary_turn(
+        self,
+        trace,
+        usage: UsageEstimate,
+        name: str,
+        system: str,
+        messages: list[Message],
+        turn,
+        latency_ms: float,
+    ) -> None:
+        """Account for helper LLM calls made inside retrieval tools."""
+        self._accumulate(usage, turn)
+        pricing = resolve_token_pricing(self.settings, turn.model)
+        turn_cost = estimate_token_cost(
+            pricing,
+            input_tokens=turn.input_tokens,
+            output_tokens=turn.output_tokens,
+            cache_hit_input_tokens=turn.cache_hit_input_tokens,
+            cache_miss_input_tokens=turn.cache_miss_input_tokens,
+        )
+        with self.tracer.generation(
+            trace,
+            name,
+            input_payload={
+                "system": system,
+                "messages": [self._message_payload(message) for message in messages],
+                "tools": [],
+                "tool_choice": "none",
+            },
+            model=turn.model,
+            model_parameters={"tool_choice": "none"},
+            provider=getattr(self.llm, "name", None),
+            provider_latency_ms=latency_ms,
+        ) as generation:
+            generation.update(
+                output={
+                    "text": turn.text,
+                    "reasoning": turn.reasoning,
+                    "tool_calls": [],
+                    "stop_reason": turn.stop_reason,
+                },
+                usage_details={
+                    "input": turn.input_tokens,
+                    "output": turn.output_tokens,
+                    "total": turn.input_tokens + turn.output_tokens,
+                    "cache_hit_input": turn.cache_hit_input_tokens,
+                    "cache_miss_input": turn.cache_miss_input_tokens,
+                    "reasoning": turn.reasoning_tokens,
+                },
+                cost_details={"total": turn_cost},
+                pricing_source=pricing.source,
+            )
+
+    @staticmethod
+    def _message_payload(message: Message) -> dict[str, Any]:
+        if isinstance(message, UserMessage):
+            return {"role": "user", "content": message.text}
+        if isinstance(message, AssistantMessage):
+            return {
+                "role": "assistant",
+                "content": message.text,
+                "tool_calls": [
+                    {
+                        "id": call.id,
+                        "name": call.name,
+                        "arguments": call.arguments,
+                    }
+                    for call in message.tool_calls
+                ],
+            }
+        if isinstance(message, ToolResultsMessage):
+            return {
+                "role": "tool",
+                "results": [
+                    {
+                        "tool_call_id": result.tool_call_id,
+                        "content": result.content,
+                    }
+                    for result in message.results
+                ],
+            }
+        raise TypeError(f"Unsupported message type: {type(message)!r}")
 
     @staticmethod
     def _call_tool(
@@ -429,14 +605,15 @@ class ResearchBriefAgent:
             system + "\n\nYou have reached your tool budget. Write the final decision "
             "memo now using the evidence already gathered. Do not call any tools."
         )
-        with self.tracer.span(trace, "forced_synthesis"):
-            turn = self._run_llm_turn(
-                directive,
-                self._messages_for_turn(messages),
-                toolset.specs,
-                stage="forced_synthesis",
-                tool_choice="none",
-            )
+        turn = self._traced_llm_turn(
+            trace,
+            "forced_synthesis",
+            directive,
+            self._messages_for_turn(messages),
+            toolset.specs,
+            stage="forced_synthesis",
+            tool_choice="none",
+        )
         self._accumulate(usage, turn)
         messages.append(AssistantMessage(turn.text, turn.tool_calls))
         if not self._is_invalid_final_text(turn.text):
@@ -473,6 +650,28 @@ class ResearchBriefAgent:
         usage.llm_call_count += 1
         usage.input_tokens += turn.input_tokens
         usage.output_tokens += turn.output_tokens
+        usage.cache_hit_input_tokens += turn.cache_hit_input_tokens
+        usage.cache_miss_input_tokens += turn.cache_miss_input_tokens
+        usage.reasoning_tokens += turn.reasoning_tokens
+        usage.model = turn.model
+
+    def _finalise_usage(self, usage: UsageEstimate) -> None:
+        if usage.llm_call_count == 0:
+            usage.estimated_cost_usd = 0.0
+            usage.pricing_source = "offline_fallback"
+            return
+        pricing = resolve_token_pricing(self.settings, usage.model)
+        usage.estimated_cost_usd = round(
+            estimate_token_cost(
+                pricing,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cache_hit_input_tokens=usage.cache_hit_input_tokens,
+                cache_miss_input_tokens=usage.cache_miss_input_tokens,
+            ),
+            8,
+        )
+        usage.pricing_source = pricing.source
 
     # -- Transcript compaction ----------------------------------------------
 
@@ -690,6 +889,7 @@ class ResearchBriefAgent:
         *,
         error: str | None = None,
         toolset: ResearchToolset | None = None,
+        live_usage: UsageEstimate | None = None,
     ) -> Iterator[dict[str, Any]]:
         with self.tracer.span(trace, "fallback_retrieval"):
             retrieval = self.tools.vector_retrieve(
@@ -723,7 +923,8 @@ class ResearchBriefAgent:
             "latency_ms": retrieval.diagnostics.retrieval_latency_ms,
         }
 
-        brief, usage = self._fallback_brief(request, retrieval.items)
+        brief, fallback_usage = self._fallback_brief(request, retrieval.items)
+        usage = live_usage if live_usage is not None else fallback_usage
         if error:
             brief += (
                 f"\n\nOperational note: live synthesis failed, so this deterministic "
@@ -745,9 +946,7 @@ class ResearchBriefAgent:
                 retrieved=retrieval.diagnostics.returned,
                 requested=request.max_papers,
             )
-        usage.estimated_cost_usd = _estimate_cost(
-            self.settings, usage.input_tokens, usage.output_tokens
-        )
+        self._finalise_usage(usage)
         url_by_id = {
             item.paper.id: (
                 str(item.paper.arxiv_url)

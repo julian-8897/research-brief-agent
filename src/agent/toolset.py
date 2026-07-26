@@ -5,7 +5,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from src.agent.query_expansion import expand_arxiv_query
+from src.agent.query_expansion import TurnObserver, expand_arxiv_query
 from src.agent.tools import ResearchTools, RetrievalResult
 from src.ingestion import FullTextFetchError, fetch_arxiv_fulltext
 from src.llm import ToolCall, ToolSpec
@@ -90,9 +90,16 @@ class ResearchToolset:
     regardless of the order in which the model chose to call things.
     """
 
-    def __init__(self, tools: ResearchTools, request: BriefRequest):
+    def __init__(
+        self,
+        tools: ResearchTools,
+        request: BriefRequest,
+        *,
+        on_llm_turn: TurnObserver | None = None,
+    ):
         self._tools = tools
         self._request = request
+        self._on_llm_turn = on_llm_turn
         self._retrieved: dict[str, SearchResponseItem] = {}
         self._ingested_ids: set[str] = set()
         # Search queries already auto-backfilled this run, so a repeated search
@@ -424,6 +431,7 @@ class ResearchToolset:
             self._tools.llm if settings.search_backfill_query_expansion else None,
             enabled=settings.search_backfill_query_expansion,
             max_words=settings.query_expansion_max_words,
+            on_turn=self._on_llm_turn,
         )
         try:
             new_count, _papers = self._tools.fetch_and_ingest(

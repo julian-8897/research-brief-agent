@@ -97,13 +97,27 @@ class OpenAICompatibleProvider:
             )
 
         usage = completion.usage
+        input_tokens = _int_attr(usage, "prompt_tokens")
+        output_tokens = _int_attr(usage, "completion_tokens")
+        prompt_details = getattr(usage, "prompt_tokens_details", None)
+        cache_hit_tokens = _int_attr(usage, "prompt_cache_hit_tokens")
+        cache_miss_tokens = _int_attr(usage, "prompt_cache_miss_tokens")
+        if not cache_hit_tokens:
+            cache_hit_tokens = _int_attr(prompt_details, "cached_tokens")
+        if not cache_miss_tokens and (cache_hit_tokens or input_tokens):
+            cache_miss_tokens = max(0, input_tokens - cache_hit_tokens)
+        completion_details = getattr(usage, "completion_tokens_details", None)
         return TurnResult(
             text=msg.content or None,
             tool_calls=tool_calls,
-            input_tokens=getattr(usage, "prompt_tokens", 0),
-            output_tokens=getattr(usage, "completion_tokens", 0),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             model=self.model,
             stop_reason="tool_calls" if tool_calls else "end",
+            reasoning=getattr(msg, "reasoning_content", None) or None,
+            cache_hit_input_tokens=cache_hit_tokens,
+            cache_miss_input_tokens=cache_miss_tokens,
+            reasoning_tokens=_int_attr(completion_details, "reasoning_tokens"),
         )
 
     def _should_disable_deepseek_thinking(self) -> bool:
@@ -152,3 +166,10 @@ class OpenAICompatibleProvider:
                 for result in message.results
             ]
         raise TypeError(f"Unsupported message type: {type(message)!r}")
+
+
+def _int_attr(value: Any, name: str) -> int:
+    try:
+        return max(0, int(getattr(value, name, 0) or 0))
+    except (TypeError, ValueError):
+        return 0

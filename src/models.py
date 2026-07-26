@@ -89,7 +89,12 @@ class FullTextDiagnostics(BaseModel):
 class UsageEstimate(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_hit_input_tokens: int = 0
+    cache_miss_input_tokens: int = 0
+    reasoning_tokens: int = 0
     estimated_cost_usd: float = 0.0
+    model: str | None = None
+    pricing_source: str | None = None
     llm_call_count: int = 0
     tool_call_count: int = 0
 

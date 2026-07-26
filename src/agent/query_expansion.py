@@ -11,7 +11,12 @@ the query is already descriptive.
 
 from __future__ import annotations
 
-from src.llm import LLMProvider, UserMessage
+import time
+from collections.abc import Callable
+
+from src.llm import LLMProvider, Message, TurnResult, UserMessage
+
+TurnObserver = Callable[[str, str, list[Message], TurnResult, float], None]
 
 _SYSTEM = (
     "You expand short academic search queries into a single dense, abstract-like "
@@ -45,6 +50,7 @@ def expand_query(
     *,
     enabled: bool = True,
     max_words: int = 12,
+    on_turn: TurnObserver | None = None,
 ) -> tuple[str, bool]:
     """Return ``(embed_text, expanded)`` for a raw search query.
 
@@ -60,12 +66,22 @@ def expand_query(
     if len(stripped.split()) > max_words:
         return stripped, False
     try:
+        messages: list[Message] = [UserMessage(_PROMPT.format(query=stripped))]
+        started = time.perf_counter()
         turn = provider.run_turn(
             _SYSTEM,
-            [UserMessage(_PROMPT.format(query=stripped))],
+            messages,
             [],
             tool_choice="none",
         )
+        if on_turn is not None:
+            on_turn(
+                "query_expansion",
+                _SYSTEM,
+                messages,
+                turn,
+                (time.perf_counter() - started) * 1000,
+            )
     except Exception:
         return stripped, False
     expansion = (turn.text or "").strip()
@@ -80,6 +96,7 @@ def expand_arxiv_query(
     *,
     enabled: bool = True,
     max_words: int = 12,
+    on_turn: TurnObserver | None = None,
 ) -> tuple[str, bool]:
     """Return ``(arxiv_query, expanded)`` for metadata backfill.
 
@@ -94,12 +111,22 @@ def expand_arxiv_query(
     if len(stripped.split()) > max_words:
         return stripped, False
     try:
+        messages: list[Message] = [UserMessage(_ARXIV_PROMPT.format(query=stripped))]
+        started = time.perf_counter()
         turn = provider.run_turn(
             _ARXIV_SYSTEM,
-            [UserMessage(_ARXIV_PROMPT.format(query=stripped))],
+            messages,
             [],
             tool_choice="none",
         )
+        if on_turn is not None:
+            on_turn(
+                "arxiv_query_expansion",
+                _ARXIV_SYSTEM,
+                messages,
+                turn,
+                (time.perf_counter() - started) * 1000,
+            )
     except Exception:
         return stripped, False
     expanded = _clean_arxiv_query(turn.text or "")

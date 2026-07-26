@@ -2,7 +2,7 @@
 
 A source-grounded briefing service for AI/ML and scientific-ML engineers and researchers making evidence-backed engineering decisions: method selection, architecture tradeoffs, technique adoption, and deployment/uncertainty risk. A user submits a research decision question; the service retrieves relevant papers, reads the full text of promising arXiv candidates when available, and streams back a cited memo covering recommendation, evidence, tradeoffs, risks, uncertainty, next steps, latency, and measured cost. The output is the memo, not a chat answer or a ranked list of links.
 
-The evidence backend is scholarly literature: persistent Qdrant retrieval with SPECTER embeddings, plus on-demand arXiv backfill when the corpus is thin. Full-text PDFs are read in-process, and the agent blocks the final memo until that evidence has been read, or records a degraded run if it cannot. Citations are grounded to evidence the run actually retrieved: the model is instructed to cite only retrieved papers, and a deterministic post-filter strips any inline citation to a paper that was not retrieved (and warns), so a capable model cannot pad the memo with famous references it recalls from training. Each run reports latency, token usage, and cost taken from the provider response, every turn and tool call is traced to Langfuse, and the streaming API writes JSONL run records plus structured request/run logs.
+The evidence backend is scholarly literature: persistent Qdrant retrieval with SPECTER embeddings, plus on-demand arXiv backfill when the corpus is thin. Full-text PDFs are read in-process, and the agent blocks the final memo until that evidence has been read, or records a degraded run if it cannot. Citations are grounded to evidence the run actually retrieved: the model is instructed to cite only retrieved papers, and a deterministic post-filter strips any inline citation to a paper that was not retrieved (and warns), so a capable model cannot pad the memo with famous references it recalls from training. Each run reports latency and provider-measured token usage, then applies a provider-aware tariff for estimated cost. Every LLM call and tool call is traced to Langfuse, and the streaming API writes JSONL run records plus structured request/run logs.
 
 Synthesis runs against Anthropic (native Claude) or any OpenAI Chat Completions-compatible endpoint (OpenAI, local models, OpenRouter, codex/opencode-style gateways). The agent loop hands the model a catalogue of evidence tools (semantic search, arXiv backfill, abstract-level detail, full-text reading) and lets it choose which to call and in what order; turn, discovery, and tool-call budgets (`AGENT_MAX_ITERATIONS`, `AGENT_MAX_SEARCH_CALLS`, `AGENT_MAX_TOOL_CALLS`) bound latency and cost. The same tool-use layer drives both backends.
 
@@ -229,6 +229,16 @@ When `OPENAI_BASE_URL=https://api.deepseek.com` and `OPENAI_MODEL=deepseek-v4*`,
 the OpenAI-compatible adapter disables DeepSeek thinking mode so the agent receives
 normal assistant `content` and tool calls instead of spending the output budget on
 reasoning-only fields.
+
+DeepSeek V4 Flash and Pro costs use built-in cache-hit, cache-miss, and output
+tariffs. Set `ESTIMATED_INPUT_TOKEN_COST_PER_1K`,
+`ESTIMATED_CACHED_INPUT_TOKEN_COST_PER_1K`, and
+`ESTIMATED_OUTPUT_TOKEN_COST_PER_1K` to override them or price another compatible
+endpoint. Offline deterministic fallbacks report zero cost. Langfuse records each
+model call as a generation with its input transcript, output text, tool calls,
+provider-returned reasoning, token breakdown, and estimated cost. Reasoning remains
+empty when the provider does not return it; the service does not enable hidden
+reasoning modes solely for observability.
 
 Tracked metrics:
 

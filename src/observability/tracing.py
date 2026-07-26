@@ -16,6 +16,27 @@ class TraceContext:
     finished: bool = False
 
 
+@dataclass
+class GenerationRecord:
+    output: dict[str, Any] | str | None = None
+    usage_details: dict[str, int] | None = None
+    cost_details: dict[str, float] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def update(
+        self,
+        *,
+        output: dict[str, Any] | str | None = None,
+        usage_details: dict[str, int] | None = None,
+        cost_details: dict[str, float] | None = None,
+        **metadata: Any,
+    ) -> None:
+        self.output = output
+        self.usage_details = usage_details
+        self.cost_details = cost_details
+        self.metadata.update(metadata)
+
+
 class Tracer:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -87,6 +108,82 @@ class Tracer:
                         span.end()
                     else:
                         span.end(metadata={**metadata, "latency_ms": latency_ms})
+                except Exception:
+                    pass
+
+    @contextmanager
+    def generation(
+        self,
+        context: TraceContext,
+        name: str,
+        *,
+        input_payload: dict[str, Any],
+        model: str,
+        model_parameters: dict[str, Any] | None = None,
+        **metadata: Any,
+    ) -> Iterator[GenerationRecord]:
+        """Record an LLM call as a Langfuse generation, including its payload."""
+        started = time.perf_counter()
+        observation = None
+        record = GenerationRecord()
+        if context.root is not None:
+            try:
+                if hasattr(context.root, "start_observation"):
+                    observation = context.root.start_observation(
+                        name=name,
+                        as_type="generation",
+                        input=input_payload,
+                        model=model,
+                        model_parameters=model_parameters,
+                        metadata=metadata,
+                    )
+                elif hasattr(context.root, "generation"):
+                    observation = context.root.generation(
+                        name=name,
+                        input=input_payload,
+                        model=model,
+                        model_parameters=model_parameters,
+                        metadata=metadata,
+                    )
+                else:
+                    observation = context.root.span(name=name, metadata=metadata)
+            except Exception:
+                observation = None
+        try:
+            yield record
+        finally:
+            latency_ms = (time.perf_counter() - started) * 1000
+            final_metadata = {
+                **metadata,
+                **record.metadata,
+                "latency_ms": latency_ms,
+            }
+            context.spans.append(
+                {
+                    "name": name,
+                    "type": "generation",
+                    "latency_ms": latency_ms,
+                    "metadata": final_metadata,
+                    "input": input_payload,
+                    "output": record.output,
+                    "usage_details": record.usage_details,
+                    "cost_details": record.cost_details,
+                    "model": model,
+                }
+            )
+            if observation is not None:
+                try:
+                    if hasattr(observation, "update"):
+                        observation.update(
+                            output=record.output,
+                            metadata=final_metadata,
+                            usage_details=record.usage_details,
+                            cost_details=record.cost_details,
+                            model=model,
+                        )
+                        observation.end()
+                    else:
+                        observation.end(metadata=final_metadata)
                 except Exception:
                     pass
 

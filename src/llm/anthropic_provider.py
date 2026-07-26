@@ -66,10 +66,15 @@ class AnthropicProvider:
         response = client.messages.create(**kwargs)
 
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         for block in response.content:
             if block.type == "text":
                 text_parts.append(block.text)
+            elif block.type == "thinking":
+                reasoning = getattr(block, "thinking", None)
+                if reasoning:
+                    reasoning_parts.append(reasoning)
             elif block.type == "tool_use":
                 tool_calls.append(
                     ToolCall(id=block.id, name=block.name, arguments=dict(block.input))
@@ -82,6 +87,7 @@ class AnthropicProvider:
             output_tokens=response.usage.output_tokens,
             model=self.model,
             stop_reason="tool_calls" if response.stop_reason == "tool_use" else "end",
+            reasoning="\n".join(reasoning_parts) or None,
         )
 
     @staticmethod
