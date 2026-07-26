@@ -15,6 +15,7 @@ from src.models import (
 from src.rerank import CrossEncoderReranker, Reranker
 from src.retrieval import PaperVectorStore
 from src.settings import Settings
+from src.web_search import WebSearchProvider
 
 
 @dataclass
@@ -32,6 +33,7 @@ class ResearchTools:
         vector_store: PaperVectorStore,
         llm: LLMProvider | None = None,
         reranker: Reranker | None = None,
+        web_search: WebSearchProvider | None = None,
     ):
         self.settings = settings
         self.arxiv_client = arxiv_client
@@ -39,6 +41,7 @@ class ResearchTools:
         self.vector_store = vector_store
         self.llm = llm
         self.reranker = reranker
+        self.web_search = web_search
         if self.reranker is None and self.settings.rerank_enabled:
             self.reranker = CrossEncoderReranker(self.settings.rerank_model)
 

@@ -8,6 +8,25 @@ from src.embeddings import (
     DEFAULT_QUERY_ADAPTER,
 )
 
+_DEFAULT_WEB_SEARCH_DOMAINS = (
+    "openai.com",
+    "anthropic.com",
+    "deepmind.google",
+    "ai.google.dev",
+    "developers.googleblog.com",
+    "mistral.ai",
+    "deepseek.com",
+    "qwen.ai",
+    "qwenlm.github.io",
+    "alibabacloud.com",
+    "ai.meta.com",
+    "livecodebench.github.io",
+    "swebench.com",
+    "lmarena.ai",
+    "artificialanalysis.ai",
+    "aider.chat",
+)
+
 # Load a local .env so secrets/config live in a gitignored file rather than the
 # shell. Tests set DISABLE_DOTENV=1 (in tests/conftest.py) to stay hermetic and
 # never pick up real provider credentials. Existing env vars always win.
@@ -160,6 +179,17 @@ class Settings:
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "deepseek-v4-flash")
     openai_base_url: str | None = os.getenv("OPENAI_BASE_URL")
+
+    # Optional bounded web evidence for recency-sensitive runs. The Exa key is
+    # never sent to the model; the server calls one fixed HTTPS API endpoint.
+    web_search_enabled: bool = _bool_env("WEB_SEARCH_ENABLED", True)
+    exa_api_key: str | None = _optional_env("EXA_API_KEY")
+    web_search_max_results: int = _int_env("WEB_SEARCH_MAX_RESULTS", 5)
+    web_search_timeout_s: float = _float_env("WEB_SEARCH_TIMEOUT_S", 12.0)
+    web_search_highlight_chars: int = _int_env("WEB_SEARCH_HIGHLIGHT_CHARS", 1200)
+    web_search_allowed_domains: tuple[str, ...] = (
+        _csv_env("WEB_SEARCH_ALLOWED_DOMAINS") or _DEFAULT_WEB_SEARCH_DOMAINS
+    )
 
     embedding_model: str = os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
     embedding_query_adapter: str = os.getenv(

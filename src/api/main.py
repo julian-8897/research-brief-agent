@@ -24,6 +24,7 @@ from src.models import BriefRequest, IngestRequest, IngestResponse, SearchRespon
 from src.observability import RunRecordStore, Tracer, configure_logging, log_event
 from src.retrieval import InMemoryVectorStore, PaperVectorStore, build_vector_store
 from src.settings import Settings, get_settings
+from src.web_search import build_web_search_provider
 
 logger = logging.getLogger("research_brief.api")
 
@@ -59,6 +60,8 @@ class Services:
         # provider client instead of reconstructing it per request.
         self._llm_provider = None
         self._llm_provider_built = False
+        self._web_search_provider = None
+        self._web_search_provider_built = False
 
     @property
     def llm_provider(self):
@@ -68,6 +71,13 @@ class Services:
         return self._llm_provider
 
     @property
+    def web_search_provider(self):
+        if not self._web_search_provider_built:
+            self._web_search_provider = build_web_search_provider(self.settings)
+            self._web_search_provider_built = True
+        return self._web_search_provider
+
+    @property
     def tools(self) -> ResearchTools:
         return ResearchTools(
             settings=self.settings,
@@ -75,6 +85,7 @@ class Services:
             embedder=self.embedder,
             vector_store=self.vector_store,
             llm=self.llm_provider,
+            web_search=self.web_search_provider,
         )
 
     @property
@@ -207,10 +218,12 @@ def _final_summary(event: dict) -> dict[str, object]:
     usage = data.get("token_cost_estimate") or {}
     retrieval = data.get("retrieval_diagnostics") or {}
     full_text = data.get("full_text_diagnostics") or {}
+    web_search = data.get("web_search_diagnostics") or {}
     return {
         "brief_latency_ms": data.get("latency_ms"),
         "warnings": data.get("warnings", []),
         "cited_papers": len(data.get("cited_papers", [])),
+        "cited_web_sources": len(data.get("cited_web_sources", [])),
         "retrieved": retrieval.get("returned"),
         "backfilled": retrieval.get("backfilled"),
         "corpus_size": retrieval.get("corpus_size"),
@@ -220,6 +233,11 @@ def _final_summary(event: dict) -> dict[str, object]:
         "freshness_source": retrieval.get("freshness_source"),
         "full_text_attempted": full_text.get("attempted"),
         "full_text_succeeded": full_text.get("succeeded"),
+        "web_search_attempted": web_search.get("attempted"),
+        "web_search_calls": web_search.get("calls"),
+        "web_search_returned": web_search.get("returned"),
+        "web_search_failed": web_search.get("failed"),
+        "web_search_cost_usd": web_search.get("estimated_cost_usd"),
         "llm_call_count": usage.get("llm_call_count"),
         "tool_call_count": usage.get("tool_call_count"),
         "input_tokens": usage.get("input_tokens"),
@@ -258,6 +276,7 @@ def _log_brief_event(
         "recency_backfill_attempted",
         "recent_candidates",
         "freshness_source",
+        "estimated_cost_usd",
         "latency_ms",
         "llm_calls",
         "full_text_fetched",
@@ -413,6 +432,22 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
             "key_present": llm_key_present,
             "reachable": "not_probed",
         }
+        web_search = {
+            "status": (
+                "configured"
+                if services.web_search_provider is not None
+                else "missing_key"
+                if services.settings.web_search_enabled
+                else "disabled"
+            ),
+            "provider": "exa",
+            "enabled": services.settings.web_search_enabled,
+            "key_present": bool(services.settings.exa_api_key),
+            "max_results": min(
+                max(1, services.settings.web_search_max_results),
+                5,
+            ),
+        }
 
         ready = (
             vector_store["status"] == "ok"
@@ -429,6 +464,7 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
             "papers_indexed": vector_store["papers_indexed"],
             "vector_store": vector_store,
             "llm_provider": llm_provider,
+            "web_search": web_search,
             "langfuse_enabled": bool(
                 services.settings.langfuse_public_key
                 and services.settings.langfuse_secret_key

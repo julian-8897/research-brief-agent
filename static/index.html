@@ -779,6 +779,15 @@
         gap: 11px;
       }
 
+      .source-group-title {
+        margin: 4px 2px 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+
       .split-list {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -1238,7 +1247,7 @@ Track latency, cost, and operational risks.</textarea>
                 <div class="gauge"><span class="gauge-label">LLM calls</span><strong id="metric-llm" class="gauge-value">-</strong></div>
                 <div class="gauge"><span class="gauge-label">Tool calls</span><strong id="metric-tools" class="gauge-value">-</strong></div>
                 <div class="gauge"><span class="gauge-label">Tokens in/out</span><strong id="metric-tokens" class="gauge-value">-</strong></div>
-                <div class="gauge"><span class="gauge-label">Cost</span><strong id="metric-cost" class="gauge-value">-</strong></div>
+                <div class="gauge"><span class="gauge-label">LLM cost</span><strong id="metric-cost" class="gauge-value">-</strong></div>
               </div>
             </div>
           </section>
@@ -1648,7 +1657,8 @@ Track latency, cost, and operational risks.</textarea>
         if (eventData.event === "started") {
           const depth = eventData.research_depth || "balanced";
           const budget = eventData.discovery_budget ?? "-";
-          return `${eventData.message || "Run started."}\n${depth} depth; up to ${budget} discovery calls.`;
+          const web = eventData.web_search_available ? "web evidence available" : "arXiv evidence";
+          return `${eventData.message || "Run started."}\n${depth} depth; up to ${budget} discovery calls; ${web}.`;
         }
         if (eventData.event === "llm_turn") {
           const tools = eventData.tools_requested && eventData.tools_requested.length
@@ -1698,6 +1708,7 @@ Track latency, cost, and operational risks.</textarea>
         const usage = data.token_cost_estimate || {};
         const diagnostics = data.retrieval_diagnostics || {};
         const fullText = data.full_text_diagnostics || {};
+        const webSearch = data.web_search_diagnostics || {};
         elements.metricState.textContent = "complete";
         elements.metricLatency.textContent = formatMs(data.latency_ms);
         elements.metricLlm.textContent = String(usage.llm_call_count ?? state.eventCounts.llm_turn);
@@ -1707,17 +1718,17 @@ Track latency, cost, and operational risks.</textarea>
         elements.memoTag.textContent = "complete";
         elements.memo.innerHTML = renderMarkdown(data.final_brief || "");
         setStatus(elements.briefStatus, `Completed in ${formatMs(data.latency_ms)}.`);
-        renderCitations(data.cited_papers || []);
+        renderCitations(data.cited_papers || [], data.cited_web_sources || []);
         renderWarnings(data.warnings || []);
-        renderDiagnostics(diagnostics, fullText, usage, data.langfuse_trace_url);
+        renderDiagnostics(diagnostics, fullText, webSearch, usage, data.langfuse_trace_url);
       }
 
-      function renderCitations(citations) {
-        if (!citations.length) {
+      function renderCitations(citations, webSources) {
+        if (!citations.length && !webSources.length) {
           elements.citations.innerHTML = '<div class="empty-state">No cited sources.</div>';
           return;
         }
-        elements.citations.innerHTML = citations.map((paper) => {
+        const paperRows = citations.map((paper) => {
           const score = Number.isFinite(paper.score) ? paper.score.toFixed(3) : "-";
           const url = paper.arxiv_url || `https://arxiv.org/abs/${encodeURIComponent(paper.id)}`;
           return `
@@ -1727,6 +1738,19 @@ Track latency, cost, and operational risks.</textarea>
             </div>
           `;
         }).join("");
+        const webRows = webSources.map((source) => {
+          const date = source.published_date || "date unavailable";
+          return `
+            <div class="citation-row">
+              <div class="citation-title"><a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">${escapeHtml(source.title)}</a></div>
+              <div class="citation-meta">${escapeHtml(source.id)} | web | ${escapeHtml(date)}</div>
+            </div>
+          `;
+        }).join("");
+        elements.citations.innerHTML = [
+          paperRows ? `<div class="source-group-title">Academic papers</div>${paperRows}` : "",
+          webRows ? `<div class="source-group-title">Current web sources</div>${webRows}` : ""
+        ].join("");
       }
 
       function renderWarnings(warnings) {
@@ -1739,7 +1763,7 @@ Track latency, cost, and operational risks.</textarea>
         `).join("");
       }
 
-      function renderDiagnostics(diagnostics, fullText, usage, traceUrl) {
+      function renderDiagnostics(diagnostics, fullText, webSearch, usage, traceUrl) {
         const errorCounts = fullText.error_counts || {};
         const errorSummary = Object.keys(errorCounts).length
           ? Object.entries(errorCounts).map(([key, value]) => `${key}: ${value}`).join(", ")
@@ -1759,6 +1783,10 @@ Track latency, cost, and operational risks.</textarea>
           ["Full text", `${fullText.succeeded ?? 0} ok / ${fullText.failed ?? 0} failed / ${fullText.attempted ?? 0} attempted`],
           ["Full-text errors", errorSummary],
           ["Missing ids", (fullText.missing_ids || []).join(", ") || "-"],
+          ["Web search", webSearch.available ? (webSearch.attempted ? "used" : "available") : "unavailable"],
+          ["Web results", webSearch.returned ?? 0],
+          ["Web failures", webSearch.failed ?? 0],
+          ["Web cost", formatMoney(Number(webSearch.estimated_cost_usd || 0))],
           ["Input tokens", usage.input_tokens ?? 0],
           ["Cached input tokens", usage.cache_hit_input_tokens ?? 0],
           ["Uncached input tokens", usage.cache_miss_input_tokens ?? 0],

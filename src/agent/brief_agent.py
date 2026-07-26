@@ -3,7 +3,11 @@ import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
-from src.agent.recency import ARXIV_RECENCY_CAVEAT, has_recency_intent
+from src.agent.recency import (
+    ARXIV_RECENCY_CAVEAT,
+    WEB_RECENCY_CAVEAT,
+    has_recency_intent,
+)
 from src.agent.tools import ResearchTools
 from src.agent.toolset import (
     ResearchToolset,
@@ -31,10 +35,10 @@ from src.models import (
 from src.observability import Tracer
 from src.settings import Settings
 
-_DISCOVERY_TOOLS = {"search_papers", "fetch_arxiv"}
+_DISCOVERY_TOOLS = {"search_papers", "fetch_arxiv", "web_search"}
 _DISCOVERY_BUDGET_NUDGE = (
-    "You have enough papers. Do not search or fetch again. Read full text and "
-    "write the memo."
+    "You have enough evidence. Do not use discovery tools again. Read the "
+    "strongest paper evidence when available, then write the memo."
 )
 _MIN_FULL_TEXT_PAPERS = 1
 _FULL_TEXT_REQUIRED_NUDGE = (
@@ -112,6 +116,9 @@ class ResearchBriefAgent:
             "message": "Research brief run started",
             "research_depth": request.research_depth,
             "discovery_budget": discovery_budget,
+            "web_search_available": bool(
+                has_recency_intent(request) and self.tools.web_search is not None
+            ),
         }
 
         if self.llm is None:
@@ -227,6 +234,14 @@ class ResearchBriefAgent:
                     usage.tool_call_count += 1
                     results.append(ToolResult(call.id, content))
                     yield {"event": "tool_result", "name": call.name, **meta}
+                    tool_warning = meta.get("warning")
+                    if isinstance(tool_warning, str) and tool_warning:
+                        warnings.append(tool_warning)
+                        yield self._warning_event(
+                            str(meta.get("code") or "tool_degraded"),
+                            tool_warning,
+                            tool=call.name,
+                        )
                 messages.append(ToolResultsMessage(results))
 
                 if discovery_calls >= discovery_budget:
@@ -316,7 +331,7 @@ class ResearchBriefAgent:
         brief = toolset.linkify_citations(brief)
         if ungrounded_ids:
             warning = (
-                "Removed citations to papers not retrieved this run "
+                "Removed citations to sources not retrieved this run "
                 f"(cited from model knowledge, not evidence): {', '.join(ungrounded_ids)}."
             )
             warnings.append(warning)
@@ -325,7 +340,7 @@ class ResearchBriefAgent:
                 warning,
                 ungrounded_ids=ungrounded_ids,
             )
-        if toolset.retrieved_count < 2:
+        if toolset.evidence_source_count < 2:
             warning = (
                 "Retrieved evidence is thin; the brief should use explicit uncertainty."
             )
@@ -333,22 +348,36 @@ class ResearchBriefAgent:
             yield self._warning_event(
                 "thin_evidence",
                 warning,
-                retrieved=toolset.retrieved_count,
+                retrieved=toolset.evidence_source_count,
+                papers=toolset.retrieved_count,
+                web_sources=toolset.web_source_count,
                 requested=request.max_papers,
             )
         if toolset.recency_sensitive:
-            warnings.append(ARXIV_RECENCY_CAVEAT)
+            recency_caveat = (
+                WEB_RECENCY_CAVEAT
+                if toolset.web_search_succeeded
+                else ARXIV_RECENCY_CAVEAT
+            )
+            warnings.append(recency_caveat)
             yield self._warning_event(
-                "arxiv_recency_limit",
-                ARXIV_RECENCY_CAVEAT,
+                (
+                    "bounded_web_recency"
+                    if toolset.web_search_succeeded
+                    else "arxiv_recency_limit"
+                ),
+                recency_caveat,
                 backfill_attempted=toolset.recency_backfill_attempted,
+                web_search_attempted=toolset.web_search_attempted,
             )
         self._finalise_usage(usage)
         response = BriefResponse(
             final_brief=brief,
             cited_papers=toolset.cited_papers(brief),
+            cited_web_sources=toolset.cited_web_sources(brief),
             retrieval_diagnostics=toolset.diagnostics(),
             full_text_diagnostics=toolset.fulltext_diagnostics(),
+            web_search_diagnostics=toolset.web_search_diagnostics(),
             latency_ms=(time.perf_counter() - started) * 1000,
             token_cost_estimate=usage,
             langfuse_trace_url=trace.trace_url,
@@ -779,6 +808,10 @@ class ResearchBriefAgent:
             "hint",
             "missing",
             "error_counts",
+            "error",
+            "message",
+            "source_policy",
+            "cached",
         ):
             if key in payload:
                 compacted[key] = payload[key]
@@ -796,6 +829,14 @@ class ResearchBriefAgent:
                 self._compact_evidence_payload(item)
                 for item in payload["evidence"]
                 if isinstance(item, dict)
+            ]
+            return compacted
+
+        if isinstance(payload.get("sources"), list):
+            compacted["sources"] = [
+                self._compact_web_source_payload(source)
+                for source in payload["sources"]
+                if isinstance(source, dict)
             ]
             return compacted
 
@@ -858,6 +899,26 @@ class ResearchBriefAgent:
             )
         return compacted
 
+    def _compact_web_source_payload(self, source: dict[str, Any]) -> dict[str, Any]:
+        compacted = {
+            key: source[key]
+            for key in (
+                "id",
+                "title",
+                "url",
+                "published_date",
+                "author",
+                "retrieved_at",
+                "citation",
+            )
+            if key in source
+        }
+        if "highlight" in source:
+            compacted["highlight_excerpt"] = self._excerpt(
+                source["highlight"], self.settings.transcript_abstract_excerpt_chars
+            )
+        return compacted
+
     def _compact_text_payload(self, text: str) -> str:
         return json.dumps(
             {
@@ -897,22 +958,34 @@ class ResearchBriefAgent:
             if full_text_budget
             else "- No full-text reads are available. State this evidence limitation.\n"
         )
-        recency_instruction = (
-            "- This is a recency-sensitive request. Freshness is limited to retrieved "
-            "arXiv evidence, not a complete view of proprietary releases, current "
-            "prices, or live leaderboards. Do not name or rank a current product unless "
-            "retrieved evidence directly evaluates it; otherwise state the gap.\n"
-            if has_recency_intent(request)
-            else ""
+        web_search_available = bool(
+            has_recency_intent(request) and self.tools.web_search is not None
         )
+        recency_instruction = ""
+        if has_recency_intent(request):
+            recency_instruction = (
+                "- This is a recency-sensitive request. "
+                + (
+                    "Use web_search for current proprietary releases, prices, API "
+                    "documentation, and live leaderboards; cite its exact [web-N] "
+                    "markers. Prefer primary sources and use arXiv for scientific "
+                    "claims. "
+                    if web_search_available
+                    else "Freshness is limited to retrieved arXiv evidence, not a "
+                    "complete view of proprietary releases, current prices, or live "
+                    "leaderboards. "
+                )
+                + "Do not name or rank a current product unless retrieved evidence "
+                "directly evaluates it; otherwise state the gap.\n"
+            )
         return (
             "You are an evidence-grounded research agent for AI/ML and scientific-ML "
             "engineering decisions. Investigate the question with the available tools, "
             f"then return a cited {brief_title.lower()}.\n\n"
             "Research:\n"
             f"- Use at most {discovery_budget} total calls to discovery tools "
-            "(search_papers and fetch_arxiv). Do not repeat a query. Use descriptive, "
-            "abstract-like search queries.\n"
+            "(search_papers, fetch_arxiv, and web_search when offered). Do not repeat "
+            "a query. Use descriptive search queries.\n"
             "- Call fetch_arxiv only when indexed results are insufficient. Stop "
             "discovery once you have enough relevant candidates.\n"
             f"{full_text_instruction}\n"

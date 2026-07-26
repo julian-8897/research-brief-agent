@@ -111,12 +111,35 @@ class CitedPaper(BaseModel):
     score: float | None = None
 
 
+class CitedWebSource(BaseModel):
+    id: str
+    title: str
+    url: HttpUrl
+    published_date: str | None = None
+    author: str | None = None
+    retrieved_at: datetime
+
+
+class WebSearchDiagnostics(BaseModel):
+    available: bool = False
+    attempted: bool = False
+    calls: int = 0
+    returned: int = 0
+    failed: int = 0
+    provider: str | None = None
+    estimated_cost_usd: float = 0.0
+
+
 class BriefResponse(BaseModel):
     final_brief: str
     cited_papers: list[CitedPaper]
+    cited_web_sources: list[CitedWebSource] = Field(default_factory=list)
     retrieval_diagnostics: RetrievalDiagnostics
     full_text_diagnostics: FullTextDiagnostics = Field(
         default_factory=FullTextDiagnostics
+    )
+    web_search_diagnostics: WebSearchDiagnostics = Field(
+        default_factory=WebSearchDiagnostics
     )
     latency_ms: float
     token_cost_estimate: UsageEstimate

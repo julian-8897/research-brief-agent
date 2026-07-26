@@ -9,6 +9,11 @@ from src.models import BriefRequest, PaperRecord
 from src.observability import Tracer
 from src.retrieval import InMemoryVectorStore
 from src.settings import Settings
+from src.web_search import (
+    WebSearchError,
+    WebSearchHit,
+    WebSearchResponse,
+)
 
 
 class FakeEmbedder:
@@ -92,6 +97,46 @@ class PartiallyFailingProvider:
                 stop_reason="tool_calls",
             )
         raise RuntimeError("provider unavailable after one paid call")
+
+
+class FakeWebSearch:
+    name = "exa"
+
+    def __init__(self, *, error: str | None = None):
+        self.error = error
+        self.calls = []
+
+    def search(
+        self,
+        query,
+        *,
+        max_results,
+        start_published_date=None,
+        end_published_date=None,
+    ):
+        self.calls.append(
+            {
+                "query": query,
+                "max_results": max_results,
+                "start": start_published_date,
+                "end": end_published_date,
+            }
+        )
+        if self.error:
+            raise WebSearchError(self.error)
+        return WebSearchResponse(
+            results=[
+                WebSearchHit(
+                    title="Official coding model release",
+                    url="https://openai.com/index/coding-model",
+                    published_date="2026-07-20",
+                    author="OpenAI",
+                    snippet="The release reports stronger coding benchmark results.",
+                )
+            ],
+            request_id="exa-request",
+            estimated_cost_usd=0.004,
+        )
 
 
 def _store_with_paper():
@@ -934,6 +979,155 @@ def test_recency_run_reports_arxiv_source_limit(monkeypatch):
     )
     assert response.retrieval_diagnostics.recency_sensitive is True
     assert response.retrieval_diagnostics.recency_backfill_attempted is False
+
+
+def test_recency_run_uses_bounded_web_evidence_and_separate_citations(monkeypatch):
+    monkeypatch.setattr(
+        "src.agent.toolset.fetch_arxiv_fulltext",
+        lambda pdf_url, *, timeout, char_budget, **kwargs: ("FULL BODY TEXT", False),
+    )
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_search_auto_backfill=False,
+    )
+    web_search = FakeWebSearch()
+    tools = ResearchTools(
+        settings,
+        FakeArxivClient(),
+        FakeEmbedder(),
+        _store_with_paper(),
+        web_search=web_search,
+    )
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="web",
+                        name="web_search",
+                        arguments={
+                            "query": "official latest coding model benchmarks",
+                            "max_results": 50,
+                        },
+                    )
+                ]
+            },
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="paper",
+                        name="search_papers",
+                        arguments={"query": "coding model benchmarks", "k": 1},
+                    )
+                ]
+            },
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="fulltext",
+                        name="get_full_text",
+                        arguments={"paper_ids": ["2401.00001"]},
+                    )
+                ]
+            },
+            {
+                "text": (
+                    "# Decision Memo\n\nCurrent release evidence [web-1] complements "
+                    "the academic evidence [2401.00001]. Unsupported [web-99]."
+                )
+            },
+        ]
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    response = agent.run(
+        BriefRequest(
+            research_question="What are the latest competitive coding models?",
+            max_papers=1,
+        )
+    )
+
+    assert provider.offered_tool_names[0][0] == "web_search"
+    assert web_search.calls[0]["max_results"] == 5
+    assert "[web-1](https://openai.com/index/coding-model)" in response.final_brief
+    assert "web-99" not in response.final_brief
+    assert [source.id for source in response.cited_web_sources] == ["web-1"]
+    assert response.cited_web_sources[0].title == "Official coding model release"
+    assert response.web_search_diagnostics.attempted is True
+    assert response.web_search_diagnostics.returned == 1
+    assert response.web_search_diagnostics.estimated_cost_usd == 0.004
+    assert response.retrieval_diagnostics.freshness_source == "arxiv+web"
+    assert any("bounded allow-list" in warning for warning in response.warnings)
+
+
+def test_web_search_tool_is_hidden_for_non_recency_questions():
+    settings = Settings(vector_store_backend="memory", embedding_dimension=2)
+    tools = ResearchTools(
+        settings,
+        FakeArxivClient(),
+        FakeEmbedder(),
+        _store_with_paper(),
+        web_search=FakeWebSearch(),
+    )
+    toolset = ResearchToolset(
+        tools,
+        BriefRequest(
+            research_question="How should retrieval systems support research briefs?"
+        ),
+    )
+
+    assert "web_search" not in [spec.name for spec in toolset.specs]
+
+
+def test_web_search_failure_is_non_fatal_and_warned():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_search_auto_backfill=False,
+    )
+    tools = ResearchTools(
+        settings,
+        FakeArxivClient(),
+        FakeEmbedder(),
+        InMemoryVectorStore(embedding_dimension=2),
+        web_search=FakeWebSearch(error="rate limited"),
+    )
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="web",
+                        name="web_search",
+                        arguments={"query": "latest coding models"},
+                    )
+                ]
+            },
+            {
+                "text": (
+                    "# Decision Memo\n\nCurrent product evidence was unavailable, "
+                    "so no ranking is supported."
+                )
+            },
+        ]
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    events = list(
+        agent._iterate(
+            BriefRequest(
+                research_question="What are the latest competitive coding models?"
+            )
+        )
+    )
+    response = events[-1]["data"]
+
+    assert response["web_search_diagnostics"]["failed"] == 1
+    assert response["web_search_diagnostics"]["returned"] == 0
+    assert response["cited_web_sources"] == []
+    assert any(event.get("code") == "web_search_failed" for event in events)
+    assert not any(event["event"] == "error" for event in events)
 
 
 def test_user_prompt_formats_constraints_as_binding_lines():

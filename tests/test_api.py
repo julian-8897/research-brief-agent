@@ -161,6 +161,9 @@ def test_index_includes_responsive_markdown_table_rendering():
     assert '<option value="balanced" selected>' in response.text
     assert '<option value="deep">Deep · 5 searches</option>' in response.text
     assert 'research_depth: $("#research-depth").value' in response.text
+    assert "data.cited_web_sources || []" in response.text
+    assert "Current web sources" in response.text
+    assert "web_search_diagnostics" in response.text
     assert "overflow-x: auto" in response.text
 
 
@@ -175,6 +178,7 @@ def test_health_endpoint():
     assert body["vector_store"]["status"] == "ok"
     assert body["vector_store"]["backend"] == "memory"
     assert body["llm_provider"]["status"] == "missing_key"
+    assert body["web_search"]["status"] == "missing_key"
 
 
 def test_app_lifespan_closes_vector_store():
@@ -210,6 +214,26 @@ def test_health_endpoint_reports_ready_when_dependencies_configured():
     assert body["ready"] is True
     assert body["vector_store"]["status"] == "ok"
     assert body["llm_provider"]["key_present"] is True
+
+
+def test_health_endpoint_reports_optional_web_search_configuration():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        anthropic_api_key="test-key",
+        exa_api_key="exa-test-key",
+    )
+    with _client_with_settings(settings) as client:
+        response = client.get("/health")
+
+    body = response.json()
+    assert body["web_search"] == {
+        "status": "configured",
+        "provider": "exa",
+        "enabled": True,
+        "key_present": True,
+        "max_results": 5,
+    }
 
 
 def test_search_endpoint():

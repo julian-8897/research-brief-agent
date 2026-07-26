@@ -19,6 +19,12 @@ ARXIV_RECENCY_CAVEAT = (
     "results."
 )
 
+WEB_RECENCY_CAVEAT = (
+    "Current-product evidence came from a bounded allow-list of web sources and "
+    "arXiv. It is a point-in-time snapshot, not a complete catalogue of releases, "
+    "prices, or live leaderboard results."
+)
+
 
 def has_recency_intent(request: BriefRequest) -> bool:
     text = " ".join(

@@ -8,6 +8,7 @@ from pathlib import Path
 os.environ["DISABLE_DOTENV"] = "1"
 os.environ.pop("ANTHROPIC_API_KEY", None)
 os.environ.pop("OPENAI_API_KEY", None)
+os.environ.pop("EXA_API_KEY", None)
 os.environ["LLM_PROVIDER"] = "anthropic"
 os.environ["RUN_RECORDS_DIR"] = ""
 

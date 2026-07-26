@@ -2,9 +2,9 @@
 
 A source-grounded briefing service for AI/ML and scientific-ML engineers and researchers making evidence-backed engineering decisions: method selection, architecture tradeoffs, technique adoption, and deployment/uncertainty risk. A user submits a research decision question; the service retrieves relevant papers, reads the full text of promising arXiv candidates when available, and streams back a cited memo covering recommendation, evidence, tradeoffs, risks, uncertainty, next steps, latency, and measured cost. The output is the memo, not a chat answer or a ranked list of links.
 
-The evidence backend is scholarly literature: persistent Qdrant retrieval with SPECTER embeddings, plus on-demand arXiv backfill when the corpus is thin. Full-text PDFs are read in-process, and the agent blocks the final memo until that evidence has been read, or records a degraded run if it cannot. Citations are grounded to evidence the run actually retrieved: the model is instructed to cite only retrieved papers, and a deterministic post-filter strips any inline citation to a paper that was not retrieved (and warns), so a capable model cannot pad the memo with famous references it recalls from training. Each run reports latency and provider-measured token usage, then applies a provider-aware tariff for estimated cost. Every LLM call and tool call is traced to Langfuse, and the streaming API writes JSONL run records plus structured request/run logs.
+The primary evidence backend is scholarly literature: persistent Qdrant retrieval with SPECTER embeddings, plus on-demand arXiv backfill when the corpus is thin. Full-text PDFs are read in-process, and the agent blocks the final memo until that evidence has been read, or records a degraded run if it cannot. Recency-sensitive questions can additionally use one bounded Exa search over an allow-list of official product and independent benchmark domains. Web results remain run-scoped and are never written to Qdrant. Citations are grounded to evidence the run actually retrieved: a deterministic post-filter strips unknown arXiv and `web-N` citation markers and warns. Each run reports latency, provider-measured token usage, LLM cost, and separate web-search cost. Every LLM call and tool call is traced to Langfuse, and the streaming API writes JSONL run records plus structured request/run logs.
 
-Synthesis runs against Anthropic (native Claude) or any OpenAI Chat Completions-compatible endpoint (OpenAI, local models, OpenRouter, codex/opencode-style gateways). The agent loop hands the model a catalogue of evidence tools (semantic search, arXiv backfill, abstract-level detail, full-text reading) and lets it choose which to call and in what order. User-selectable Quick, Balanced, and Deep discovery presets plus server-side turn, discovery, and tool-call limits bound latency and cost. The same tool-use layer drives both backends.
+Synthesis runs against Anthropic (native Claude) or any OpenAI Chat Completions-compatible endpoint (OpenAI, local models, OpenRouter, codex/opencode-style gateways). The agent loop hands the model a catalogue of evidence tools (semantic search, arXiv backfill, bounded web search, abstract-level detail, full-text reading) and lets it choose which to call and in what order. User-selectable Quick, Balanced, and Deep discovery presets plus server-side turn, discovery, and tool-call limits bound latency and cost. The same tool-use layer drives both backends.
 
 ## Architecture
 
@@ -17,12 +17,13 @@ flowchart LR
     API --> Agent[Agent loop]
     Agent -->|tool: search_papers| Qdrant
     Agent -->|tool: fetch_arxiv| Ingest
+    Agent -->|recency tool: web_search| Exa[Exa Search API]
     Agent <-->|turn / tool_use| LLM[LLM backend<br/>Claude / OpenAI-compatible]
     Agent --> Stream[Server-sent events]
     Agent --> Langfuse[Langfuse traces]
 ```
 
-The agent exposes four tools to the model: `search_papers` (semantic retrieval over the Qdrant corpus), `fetch_arxiv` (pull fresh metadata from arXiv and index it when the corpus is thin), `get_paper_details` (abstract-level evidence for specific papers), and `get_full_text` (download a paper PDF and read its body: methods and results, not just the abstract). The model composes these, then writes the cited decision brief as its final turn. Full-text fetching runs in-process (pypdf), so it stays deployable with no external paper service.
+The agent exposes four literature tools to the model: `search_papers` (semantic retrieval over the Qdrant corpus), `fetch_arxiv` (pull fresh metadata from arXiv and index it when the corpus is thin), `get_paper_details` (abstract-level evidence for specific papers), and `get_full_text` (download a paper PDF and read its body: methods and results, not just the abstract). When `EXA_API_KEY` is configured, recency-sensitive runs also expose `web_search`, capped at five highlighted results from the configured allow-list. The model composes these, then writes the cited decision brief as its final turn. Full-text fetching runs in-process (pypdf), so it stays deployable with no external paper service.
 
 To keep multi-turn runs from repeatedly paying for the same large evidence payloads, the agent compacts older tool results before each provider call. The newest tool result is kept raw for one turn, then older search/detail/full-text payloads are replaced with IDs, titles, errors, and bounded excerpts while preserving the provider-required tool-call/tool-result transcript shape.
 
@@ -31,9 +32,10 @@ Recency-sensitive questions use a separate guarded path. Terms such as `latest`,
 date, even when a stale local vector hit clears the normal relevance floor. Fresh
 papers are scored directly by id, so global semantic top-k truncation cannot silently
 discard the fresh lane. Papers that clear the configured relevance floor are then
-interleaved with semantic leaders without changing their cosine scores. The response
-always warns that arXiv cannot provide a complete catalogue of proprietary releases,
-current prices, or live leaderboard results.
+interleaved with semantic leaders without changing their cosine scores. If configured,
+the separate web lane can support current product, pricing, API, and live-leaderboard
+claims using stable `web-N` citations. Web failures are non-fatal and fall back to the
+arXiv-only caveat.
 
 ## Public API
 
@@ -163,6 +165,7 @@ Environment variables are documented in [.env.example](.env.example). Key settin
 - `LLM_PROVIDER=anthropic|openai`, `LLM_MAX_TOKENS`, `LLM_TEMPERATURE`
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (Claude backend)
 - `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` (OpenAI-compatible backend)
+- `WEB_SEARCH_ENABLED`, `EXA_API_KEY`, `WEB_SEARCH_MAX_RESULTS`, `WEB_SEARCH_TIMEOUT_S`, `WEB_SEARCH_HIGHLIGHT_CHARS`, `WEB_SEARCH_ALLOWED_DOMAINS` (optional recency-only web evidence)
 - `AGENT_MAX_ITERATIONS`, `AGENT_MAX_TOOL_CALLS`, `AGENT_QUICK_SEARCH_CALLS`, `AGENT_MAX_SEARCH_CALLS` (Balanced), `AGENT_DEEP_SEARCH_CALLS`, `AGENT_SEARCH_CALLS_HARD_LIMIT` (agent loop and research-depth budgets)
 - `TRANSCRIPT_KEEP_RECENT_TOOL_RESULTS`, `TRANSCRIPT_FULL_TEXT_EXCERPT_CHARS`, `TRANSCRIPT_ABSTRACT_EXCERPT_CHARS` (prompt-token compaction)
 - `FULL_TEXT_CHAR_BUDGET`, `FULL_TEXT_MAX_PAPERS`, `FULL_TEXT_TOTAL_PAPER_BUDGET`, `FULL_TEXT_TIMEOUT_S` (full-text tool limits)
@@ -262,7 +265,7 @@ Tracked metrics:
 - retrieval latency
 - LLM call count (one per agent turn), tool-call count, and full-text success/attempts
 - measured input/output tokens
-- estimated cost per brief
+- estimated LLM cost per brief and separate Exa-reported web-search cost
 - number of cited papers
 - Langfuse trace coverage
 
@@ -286,8 +289,8 @@ collection.
 Current verification:
 
 ```text
-140 passed, 1 warning on Python 3.11, 3.12, and 3.13; ruff check and
-format clean; 7-case offline core quality gate passing
+184 passed, 1 warning locally on Python 3.12; ruff check and format clean;
+7-case offline core quality gate passing
 ```
 
 ## Project Structure
@@ -300,6 +303,7 @@ src/
   ingestion/       arXiv query/date normalization, paper fetching, PDF full text
   retrieval/       Qdrant and in-memory vector stores
   observability/   Langfuse tracing, structured logging, JSONL run records
+  web_search.py    Optional bounded Exa search adapter for current web evidence
   arxiv_client.py  arXiv metadata client
   embeddings.py    SPECTER2 asymmetric embedder with adapter validation
   models.py        Pydantic request/response models

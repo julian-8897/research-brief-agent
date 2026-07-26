@@ -4,6 +4,27 @@ Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-07-26_
 
+## Bounded current-web evidence (2026-07-26)
+
+- [x] Added one direct Exa `web_search` tool without MCP or a new dependency.
+- [x] Exposed it only for recency-sensitive runs when `EXA_API_KEY` is
+  configured; calls share the existing discovery budget and return at most five
+  query-focused highlights.
+- [x] Restricted results to configurable HTTPS official-product and independent
+  benchmark domains, with server-side post-filtering.
+- [x] Kept web evidence run-scoped and separate from Qdrant.
+- [x] Added stable `web-N` citations, deterministic unknown-citation removal,
+  separate API/UI source rendering, retrieval timestamps, and Exa-reported cost.
+- [x] Made expected HTTP/provider failures non-fatal with an explicit warning and
+  arXiv-only continuation.
+- [x] Preserved provider parity through the existing canonical tool layer and
+  kept tests hermetic by clearing real Exa credentials.
+
+**Verification:** `uv run pytest -q` → 184 passed; `ruff check` and
+`ruff format --check` clean; browser JavaScript syntax passed; the hermetic
+seven-case core quality gate passed. A live Exa call remains unverified because
+`EXA_API_KEY` is not configured locally.
+
 ## Recency candidate-lane correction (2026-07-26)
 
 - [x] Added targeted cosine scoring by paper id to the in-memory and Qdrant
