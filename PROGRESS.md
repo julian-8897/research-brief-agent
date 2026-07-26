@@ -4,6 +4,28 @@ Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-07-26_
 
+## Corpus lifecycle hardening (2026-07-26)
+
+- [x] Plain local launches now use the persistent embedded corpus configured at
+  `.local/qdrant-corpus`; Docker Compose explicitly clears `QDRANT_PATH` and uses
+  its persistent Qdrant service volume.
+- [x] FastAPI shutdown flushes Langfuse and closes the vector store, including the
+  embedded Qdrant client.
+- [x] Existing Qdrant collections are validated for vector dimension and cosine
+  distance before use, with guidance to use a versioned collection when embeddings
+  change.
+- [x] Retrieval diagnostics and structured run logs now report papers backfilled
+  and resulting corpus size.
+- [x] Manual ingestion skips existing papers by default and supports explicit
+  metadata/embedding refresh through `refresh_existing=true`.
+- [x] Existing regression coverage confirms arXiv-id deduplication and once-per-run
+  query backfill; lifecycle, schema and refresh tests were added.
+
+**Verification:** `uv run pytest -q` → 155 passed; `ruff check` and
+`ruff format --check` clean; `docker compose config` confirms server-backed Qdrant
+selection for the Compose stack; a plain `uv run uvicorn` launch reopened the
+existing 344-paper embedded corpus with `ready=true` and no fallback.
+
 ## Memo table rendering (2026-07-26)
 
 - [x] Added Markdown table parsing to the browser UI so comparison tables render as
@@ -36,10 +58,8 @@ live Qdrant-backed service serves the updated parser at `http://127.0.0.1:8000`.
   (run `a71b9aea3f244322b693b63ccba5c8c7`) returned grounded evidence and a useful
   conditional recommendation, but exposed synthesis notes and ended mid-sentence
   without a warning. Final-output truncation and preamble detection remain open.
-- **Shutdown lifecycle remains noisy.** Embedded Qdrant is not explicitly closed by
-  the FastAPI lifespan, and interpreter shutdown can emit a `QdrantClient.__del__`
-  exception. Persistence was unaffected in these tests, but the lifecycle should be
-  closed explicitly.
+- **Shutdown lifecycle fixed 2026-07-26.** FastAPI now explicitly closes embedded
+  Qdrant after flushing Langfuse.
 
 ## Langfuse SDK compatibility (2026-07-26)
 

@@ -60,6 +60,10 @@ class PaperVectorStore(ABC):
     def count(self) -> int:
         raise NotImplementedError
 
+    def close(self) -> None:
+        """Release store resources; in-memory implementations need no action."""
+        return None
+
 
 class InMemoryVectorStore(PaperVectorStore):
     backend_name = "memory"
@@ -125,6 +129,7 @@ class QdrantPaperVectorStore(PaperVectorStore):
 
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._collection_validated = False
         try:
             from qdrant_client import QdrantClient
             from qdrant_client.http.models import Distance, VectorParams
@@ -147,8 +152,13 @@ class QdrantPaperVectorStore(PaperVectorStore):
             )
 
     def ensure_collection(self) -> None:
+        if self._collection_validated:
+            return
         collections = self.client.get_collections().collections
         if any(item.name == self.settings.qdrant_collection for item in collections):
+            info = self.client.get_collection(self.settings.qdrant_collection)
+            self._validate_collection_vectors(info.config.params.vectors)
+            self._collection_validated = True
             return
         self.client.create_collection(
             collection_name=self.settings.qdrant_collection,
@@ -157,6 +167,28 @@ class QdrantPaperVectorStore(PaperVectorStore):
                 distance=self._models["Distance"].COSINE,
             ),
         )
+        self._collection_validated = True
+
+    def _validate_collection_vectors(self, vectors: Any) -> None:
+        if isinstance(vectors, dict):
+            raise RuntimeError(
+                f"Qdrant collection '{self.settings.qdrant_collection}' uses named "
+                "vectors, but this service requires one unnamed vector."
+            )
+        size = getattr(vectors, "size", None)
+        distance = getattr(vectors, "distance", None)
+        distance_value = getattr(distance, "value", distance)
+        if size != self.settings.embedding_dimension:
+            raise RuntimeError(
+                f"Qdrant collection '{self.settings.qdrant_collection}' has vector "
+                f"size {size}; expected {self.settings.embedding_dimension}. Use a "
+                "new versioned QDRANT_COLLECTION when changing embedding models."
+            )
+        if str(distance_value).casefold() != "cosine":
+            raise RuntimeError(
+                f"Qdrant collection '{self.settings.qdrant_collection}' uses "
+                f"distance {distance_value}; expected Cosine."
+            )
 
     def upsert(
         self, papers: list[PaperRecord | dict[str, Any]], embeddings: np.ndarray

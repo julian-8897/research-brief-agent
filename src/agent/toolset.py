@@ -98,6 +98,8 @@ class ResearchToolset:
         # Search queries already auto-backfilled this run, so a repeated search
         # for the same topic does not re-hit arXiv.
         self._backfilled_queries: set[str] = set()
+        self._backfilled_count = 0
+        self._corpus_size: int | None = None
         self._search_latency_ms = 0.0
         self._max_requested_k = 0
         # Full-text bodies fetched this run, cached by id so a repeated request
@@ -348,12 +350,15 @@ class ResearchToolset:
             self._request.research_question, query, self._request.constraints
         )
         result = self._tools.vector_retrieve(query, k, embed_text=embed_text)
+        self._corpus_size = result.diagnostics.corpus_size
         self._search_latency_ms += result.diagnostics.retrieval_latency_ms
         backfilled = 0
         if self._should_backfill(query, result):
             backfilled = self._backfill_for_query(query)
             if backfilled:
+                self._backfilled_count += backfilled
                 result = self._tools.vector_retrieve(query, k, embed_text=embed_text)
+                self._corpus_size = result.diagnostics.corpus_size
                 self._search_latency_ms += result.diagnostics.retrieval_latency_ms
         self._max_requested_k = max(self._max_requested_k, k)
         for item in result.items:
@@ -371,6 +376,7 @@ class ResearchToolset:
             "query": query,
             "returned": len(papers),
             "papers": papers,
+            "corpus_size": self._corpus_size,
         }
         if backfilled:
             body["backfilled"] = backfilled
@@ -380,7 +386,10 @@ class ResearchToolset:
                 "Call fetch_arxiv with a descriptive arXiv query, then "
                 "run search_papers once again."
             )
-        meta: dict[str, Any] = {"returned": len(papers)}
+        meta: dict[str, Any] = {
+            "returned": len(papers),
+            "corpus_size": self._corpus_size,
+        }
         if backfilled:
             meta["backfilled"] = backfilled
         return json.dumps(body), meta
@@ -725,6 +734,8 @@ class ResearchToolset:
             retrieval_latency_ms=self._search_latency_ms,
             min_score=min(scores) if scores else None,
             max_score=max(scores) if scores else None,
+            backfilled=self._backfilled_count,
+            corpus_size=self._corpus_size,
         )
 
     def fulltext_diagnostics(self) -> FullTextDiagnostics:

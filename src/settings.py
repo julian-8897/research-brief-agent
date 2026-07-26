@@ -151,7 +151,7 @@ class Settings:
     qdrant_api_key: str | None = os.getenv("QDRANT_API_KEY")
     # Embedded local mode: when set, qdrant-client persists to this folder
     # in-process (no server / Docker). Takes precedence over qdrant_url.
-    qdrant_path: str | None = os.getenv("QDRANT_PATH")
+    qdrant_path: str | None = _optional_env("QDRANT_PATH")
     qdrant_collection: str = os.getenv("QDRANT_COLLECTION", "arxiv_papers")
     vector_store_backend: str = os.getenv("VECTOR_STORE_BACKEND", "qdrant")
 

@@ -1732,6 +1732,8 @@ Track latency, cost, and operational risks.</textarea>
           ["Query", diagnostics.query || "-"],
           ["Requested k", diagnostics.requested_k ?? "-"],
           ["Returned", diagnostics.returned ?? "-"],
+          ["Backfilled", diagnostics.backfilled ?? 0],
+          ["Corpus size", diagnostics.corpus_size ?? "-"],
           ["Retrieval latency", formatMs(diagnostics.retrieval_latency_ms)],
           ["Score range", `${diagnostics.min_score ?? "-"} to ${diagnostics.max_score ?? "-"}`],
           ["Full text", `${fullText.succeeded ?? 0} ok / ${fullText.failed ?? 0} failed / ${fullText.attempted ?? 0} attempted`],

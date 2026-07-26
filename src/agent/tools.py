@@ -86,6 +86,10 @@ class ResearchTools:
             items = items[:k]
         latency_ms = (time.perf_counter() - started) * 1000
         scores = [item.score for item in items]
+        try:
+            corpus_size = self.vector_store.count()
+        except Exception:
+            corpus_size = None
         return RetrievalResult(
             items=items,
             diagnostics=RetrievalDiagnostics(
@@ -95,10 +99,18 @@ class ResearchTools:
                 retrieval_latency_ms=latency_ms,
                 min_score=min(scores) if scores else None,
                 max_score=max(scores) if scores else None,
+                corpus_size=corpus_size,
             ),
         )
 
-    def fetch_and_ingest(self, query: str, max_papers: int, date_range=None):
+    def fetch_and_ingest(
+        self,
+        query: str,
+        max_papers: int,
+        date_range=None,
+        *,
+        refresh_existing: bool = False,
+    ):
         """Fetch fresh arXiv metadata for a model-supplied query and index it.
 
         Returns ``(ingested_count, papers)`` so the agent loop can report what
@@ -111,20 +123,27 @@ class ResearchTools:
             date_range=date_range,
             sort=self.settings.arxiv_sort,
         )
-        return self.ingest_papers(papers), papers
+        return (
+            self.ingest_papers(papers, refresh_existing=refresh_existing),
+            papers,
+        )
 
-    def ingest_papers(self, papers) -> int:
+    def ingest_papers(self, papers, *, refresh_existing: bool = False) -> int:
         if not papers:
             return 0
-        existing = self.vector_store.existing_ids([paper.id for paper in papers])
-        new_papers = [paper for paper in papers if paper.id not in existing]
-        if not new_papers:
+        papers_to_upsert = papers
+        if not refresh_existing:
+            existing = self.vector_store.existing_ids([paper.id for paper in papers])
+            papers_to_upsert = [paper for paper in papers if paper.id not in existing]
+        if not papers_to_upsert:
             return 0
-        texts = [build_paper_embedding_text(paper.model_dump()) for paper in new_papers]
+        texts = [
+            build_paper_embedding_text(paper.model_dump()) for paper in papers_to_upsert
+        ]
         embeddings = self.embedder.encode_documents(
             texts, batch_size=self.settings.embedding_batch_size
         )
-        return self.vector_store.upsert(new_papers, embeddings)
+        return self.vector_store.upsert(papers_to_upsert, embeddings)
 
     def extract_evidence(self, items: list[SearchResponseItem]) -> list[dict]:
         evidence = []

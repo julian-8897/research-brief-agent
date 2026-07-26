@@ -1,8 +1,16 @@
+from types import SimpleNamespace
+
 import numpy as np
+import pytest
 
 from src import VectorStore
 from src.models import PaperRecord
-from src.retrieval.store import InMemoryVectorStore, _point_id
+from src.retrieval.store import (
+    InMemoryVectorStore,
+    QdrantPaperVectorStore,
+    _point_id,
+)
+from src.settings import Settings
 
 
 def test_in_memory_vector_store_upsert_and_search():
@@ -47,6 +55,45 @@ def test_in_memory_vector_store_reports_existing_ids():
 def test_qdrant_point_id_is_deterministic_uuid():
     assert _point_id("2401.00001") == _point_id("2401.00001")
     assert len(_point_id("2401.00001").split("-")) == 5
+
+
+def test_qdrant_collection_schema_accepts_expected_vectors():
+    store = object.__new__(QdrantPaperVectorStore)
+    store.settings = Settings(
+        vector_store_backend="qdrant",
+        embedding_dimension=768,
+        qdrant_collection="arxiv_papers",
+    )
+
+    store._validate_collection_vectors(
+        SimpleNamespace(size=768, distance=SimpleNamespace(value="Cosine"))
+    )
+
+
+@pytest.mark.parametrize(
+    ("vectors", "message"),
+    [
+        (
+            SimpleNamespace(size=384, distance=SimpleNamespace(value="Cosine")),
+            "size 384; expected 768",
+        ),
+        (
+            SimpleNamespace(size=768, distance=SimpleNamespace(value="Dot")),
+            "distance Dot; expected Cosine",
+        ),
+        ({"title": SimpleNamespace(size=768)}, "uses named vectors"),
+    ],
+)
+def test_qdrant_collection_schema_rejects_incompatible_vectors(vectors, message):
+    store = object.__new__(QdrantPaperVectorStore)
+    store.settings = Settings(
+        vector_store_backend="qdrant",
+        embedding_dimension=768,
+        qdrant_collection="arxiv_papers",
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        store._validate_collection_vectors(vectors)
 
 
 def test_legacy_vector_store_export_forwards_add_papers():

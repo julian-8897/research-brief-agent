@@ -28,6 +28,10 @@ class IngestRequest(BaseModel):
     query: str = Field(..., examples=["cat:cs.LG"])
     max_papers: int = Field(default=50, ge=1, le=500)
     date_range: DateRange | None = None
+    refresh_existing: bool = Field(
+        default=False,
+        description="Re-embed and update papers already present in the corpus.",
+    )
 
 
 class IngestResponse(BaseModel):
@@ -69,6 +73,8 @@ class RetrievalDiagnostics(BaseModel):
     retrieval_latency_ms: float
     min_score: float | None = None
     max_score: float | None = None
+    backfilled: int = 0
+    corpus_size: int | None = None
 
 
 class FullTextDiagnostics(BaseModel):

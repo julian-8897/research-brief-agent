@@ -74,15 +74,13 @@ uv run uvicorn src.api.main:app --reload
 ```
 
 Open `http://localhost:8000`. The console is ask-first: type a technical decision
-question and run the agent, which retrieves and reads evidence itself. If Qdrant is not
-already running at `QDRANT_URL`, local mode falls back to the in-memory store and
-`/health` reports `ready=false` with `vector_store.fallback=true`. The first
+question and run the agent, which retrieves and reads evidence itself. The example
+configuration uses embedded Qdrant at `.local/qdrant-corpus`, so plain local launches
+retain papers without Docker. The collection may start empty; uncovered questions
+backfill it from arXiv automatically. Run `uv run python scripts/seed_corpus.py`
+beforehand when you want the benchmark corpus warm on the first request. The first
 search/brief call may download the SPECTER embedding model unless it is already
 cached.
-
-Persistent local retrieval requires a Qdrant server listening on `QDRANT_URL`
-before uvicorn starts. If Qdrant starts after uvicorn, restart uvicorn so the app
-selects the Qdrant backend during startup.
 
 Docker Compose remains available for the full API + Qdrant stack:
 
@@ -131,6 +129,9 @@ curl -N -X POST http://localhost:8000/briefs/stream \
   -d '{"research_question":"How should teams communicate uncertainty when neural models support technical decisions?","domain":"cs.LG","max_papers":6}'
 ```
 
+`POST /ingest` skips arXiv ids already present by default. Set
+`"refresh_existing": true` to refresh their metadata and embeddings explicitly.
+
 Set credentials for the configured synthesis backend (`ANTHROPIC_API_KEY` for the default `anthropic` provider, or `OPENAI_API_KEY` for the `openai` provider). Without a key, the service returns a deterministic fallback memo, which keeps local tests and CI runnable.
 
 ## Configuration
@@ -139,7 +140,7 @@ Environment variables are documented in [.env.example](.env.example). Key settin
 
 - `ENVIRONMENT=local|production`
 - `API_KEYS`, `API_KEY_HEADER_NAME`, `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_SECONDS`
-- `QDRANT_URL`, `QDRANT_COLLECTION`, `QDRANT_API_KEY`
+- `QDRANT_URL`, `QDRANT_PATH`, `QDRANT_COLLECTION`, `QDRANT_API_KEY`
 - `VECTOR_STORE_BACKEND=qdrant` for persistence or `memory` for tests
 - `EMBEDDING_MODEL=allenai/specter2_base`
 - `EMBEDDING_DOCUMENT_ADAPTER=allenai/specter2`
@@ -155,6 +156,11 @@ Environment variables are documented in [.env.example](.env.example). Key settin
 - `LOG_LEVEL`, `STRUCTURED_LOGS`, `RUN_RECORDS_DIR`, `RUN_RECORDS_REQUIRED`
 - `DEFAULT_MAX_PAPERS`, `MAX_INGEST_RESULTS`, `MAX_RETRIEVAL_RESULTS`, `RETRIEVAL_MIN_SCORE`
 - `QUERY_EXPANSION_ENABLED`, `SEARCH_AUTO_BACKFILL=false`, `SEARCH_BACKFILL_QUERY_EXPANSION`, `RERANK_ENABLED=false`, `RERANK_MODEL`, `RERANK_CANDIDATE_K`
+
+Existing Qdrant collections are checked at startup for the configured vector
+dimension and cosine distance. Use a new versioned `QDRANT_COLLECTION` name before
+changing embedding models or adapters; migrate or reseed deliberately rather than
+mixing incompatible vectors.
 
 ## Fly Deployment (optional hosted demo)
 

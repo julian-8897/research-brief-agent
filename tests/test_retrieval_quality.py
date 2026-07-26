@@ -276,7 +276,10 @@ def test_search_papers_auto_backfills_when_corpus_is_empty():
     assert arxiv_client.calls == [("all:quantization methods", 25)]
     assert payload["backfilled"] == 1
     assert meta["backfilled"] == 1
+    assert meta["corpus_size"] == 1
     assert [p["id"] for p in payload["papers"]] == ["2501.09999"]
+    assert toolset.diagnostics().backfilled == 1
+    assert toolset.diagnostics().corpus_size == 1
 
 
 def test_search_papers_skips_backfill_when_local_hit_is_strong():
@@ -339,7 +342,7 @@ def test_search_papers_respects_auto_backfill_toggle():
     payload = json.loads(content)
 
     assert arxiv_client.calls == []
-    assert meta == {"returned": 0}
+    assert meta == {"returned": 0, "corpus_size": 0}
     assert payload["returned"] == 0
     assert "backfilled" not in payload
     assert "fetch_arxiv" in payload["hint"]
@@ -386,7 +389,7 @@ def test_search_papers_returns_fetch_hint_when_floor_filters_all_results():
     content, meta = toolset._search_papers("neural operators", 1)
     payload = json.loads(content)
 
-    assert meta == {"returned": 0}
+    assert meta == {"returned": 0, "corpus_size": 1}
     assert payload["returned"] == 0
     assert payload["papers"] == []
     assert "fetch_arxiv" in payload["hint"]

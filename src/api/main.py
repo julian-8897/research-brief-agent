@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from src.agent import ResearchBriefAgent, ResearchTools
 from src.api.sse import format_sse_event
 from src.arxiv_client import ArxivClient
-from src.embeddings import TextEmbedder, build_paper_embedding_text
+from src.embeddings import TextEmbedder
 from src.ingestion import fetch_arxiv_papers
 from src.llm import build_llm_provider
 from src.models import BriefRequest, IngestRequest, IngestResponse, SearchResponse
@@ -193,6 +193,13 @@ def _llm_key_present(settings: Settings) -> bool:
     return False
 
 
+def _safe_corpus_size(vector_store: PaperVectorStore) -> int | None:
+    try:
+        return vector_store.count()
+    except Exception:
+        return None
+
+
 def _final_summary(event: dict) -> dict[str, object]:
     data = event.get("data")
     if not isinstance(data, dict):
@@ -205,6 +212,8 @@ def _final_summary(event: dict) -> dict[str, object]:
         "warnings": data.get("warnings", []),
         "cited_papers": len(data.get("cited_papers", [])),
         "retrieved": retrieval.get("returned"),
+        "backfilled": retrieval.get("backfilled"),
+        "corpus_size": retrieval.get("corpus_size"),
         "full_text_attempted": full_text.get("attempted"),
         "full_text_succeeded": full_text.get("succeeded"),
         "llm_call_count": usage.get("llm_call_count"),
@@ -239,6 +248,8 @@ def _log_brief_event(
         "reason",
         "stage",
         "returned",
+        "backfilled",
+        "corpus_size",
         "latency_ms",
         "llm_calls",
         "full_text_fetched",
@@ -260,10 +271,21 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
             services.settings.rate_limit_requests,
             services.settings.rate_limit_window_seconds,
         )
+        log_event(
+            logger,
+            "vector_store_ready",
+            backend=services.vector_store.backend_name,
+            collection=services.settings.qdrant_collection,
+            papers_indexed=_safe_corpus_size(services.vector_store),
+            fallback=services.vector_store_status.fallback,
+        )
         try:
             yield
         finally:
-            services.tracer.flush()
+            try:
+                services.tracer.flush()
+            finally:
+                services.vector_store.close()
 
     service_app = FastAPI(
         title="Research Brief Agent",
@@ -441,14 +463,20 @@ def create_app(initial_services: Services | None = None) -> FastAPI:
                     f"date range, or reduce max_papers. Original error: {exc}"
                 ),
             ) from exc
-        if papers:
-            texts = [build_paper_embedding_text(paper.model_dump()) for paper in papers]
-            embeddings = services.embedder.encode_documents(
-                texts, batch_size=services.settings.embedding_batch_size
-            )
-            ingested = services.vector_store.upsert(papers, embeddings)
-        else:
-            ingested = 0
+        ingested = services.tools.ingest_papers(
+            papers,
+            refresh_existing=request.refresh_existing,
+        )
+        log_event(
+            logger,
+            "papers_ingested",
+            query=request.query,
+            fetched=len(papers),
+            ingested=ingested,
+            refresh_existing=request.refresh_existing,
+            corpus_size=_safe_corpus_size(services.vector_store),
+            collection=services.settings.qdrant_collection,
+        )
         return IngestResponse(
             ingested=ingested,
             collection=services.settings.qdrant_collection,

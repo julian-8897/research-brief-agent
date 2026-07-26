@@ -54,6 +54,15 @@ class NetworkFailingArxivClient:
         raise requests.ConnectionError("connection aborted")
 
 
+class CloseTrackingStore(InMemoryVectorStore):
+    def __init__(self, embedding_dimension):
+        super().__init__(embedding_dimension)
+        self.close_calls = 0
+
+    def close(self):
+        self.close_calls += 1
+
+
 def _parse_sse_events(body: str):
     events = []
     for chunk in body.split("\n\n"):
@@ -161,6 +170,25 @@ def test_health_endpoint():
     assert body["vector_store"]["status"] == "ok"
     assert body["vector_store"]["backend"] == "memory"
     assert body["llm_provider"]["status"] == "missing_key"
+
+
+def test_app_lifespan_closes_vector_store():
+    settings = Settings(vector_store_backend="memory", embedding_dimension=2)
+    store = CloseTrackingStore(embedding_dimension=2)
+    app = create_app(
+        Services(
+            settings=settings,
+            arxiv_client=FakeArxivClient(),
+            embedder=FakeEmbedder(),
+            vector_store=store,
+            tracer=Tracer(settings),
+        )
+    )
+
+    with TestClient(app) as client:
+        assert client.get("/").status_code == 200
+
+    assert store.close_calls == 1
 
 
 def test_health_endpoint_reports_ready_when_dependencies_configured():
@@ -278,8 +306,23 @@ def test_ingest_endpoint():
         response = client.post("/ingest", json={"query": "cat:cs.IR", "max_papers": 1})
 
     assert response.status_code == 200
-    assert response.json()["ingested"] == 1
+    assert response.json()["ingested"] == 0
     assert response.json()["retrieval_backend"] == "memory"
+
+
+def test_ingest_endpoint_can_refresh_existing_papers():
+    with _client() as client:
+        response = client.post(
+            "/ingest",
+            json={
+                "query": "cat:cs.IR",
+                "max_papers": 1,
+                "refresh_existing": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["ingested"] == 1
 
 
 def test_ingest_endpoint_returns_json_for_arxiv_failure():
