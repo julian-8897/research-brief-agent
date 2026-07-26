@@ -14,12 +14,15 @@ _Last updated: 2026-07-26_
   `LANGFUSE_HOST` remains accepted as a fallback.
 - [x] Added regression coverage for Langfuse 4 root observations, child spans,
   idempotent finalisation, trace URLs, and flushing.
-- [ ] Add local Langfuse project credentials and capture a real uploaded trace.
-  Blocked only on `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`; neither is
-  currently configured.
+- [x] Added local Langfuse project credentials and captured a real uploaded trace.
+  Run `caf583776a164afbb536d4de17738978` produced trace
+  `9cb7e7cc60c863c0d719e44ba30a1b7a`: the Langfuse API returned the
+  `research_brief` root with three `llm_turn` spans, `tool:search_papers`,
+  `tool:get_full_text`, and populated input/output fields.
 
 **Verification:** `uv run pytest -q` → 148 passed; `ruff check` and
-`ruff format --check` clean.
+`ruff format --check` clean. Live Langfuse authentication, upload, flush, and
+trace retrieval passed.
 
 ## Live product review (2026-07-21) — retrieval usefulness gap
 
