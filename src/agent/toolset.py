@@ -285,8 +285,9 @@ class ResearchToolset:
             description=(
                 "Fetch and read the full body text (methods, experiments, "
                 "results) of specific papers by arXiv id, not just the "
-                "abstract. Use on the few most promising papers before "
-                "writing the memo to ground claims in actual evidence."
+                "abstract. This tool accepts only arXiv ids surfaced by "
+                "search_papers, never web-N ids. Use it on the few most promising "
+                "papers before writing the memo to ground claims in actual evidence."
             ),
             input_schema={
                 "type": "object",
@@ -294,7 +295,10 @@ class ResearchToolset:
                     "paper_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "arXiv ids to read in full (a few at most).",
+                        "description": (
+                            "Exact arXiv ids surfaced by search_papers, never web-N "
+                            "ids (a few at most)."
+                        ),
                     }
                 },
                 "required": ["paper_ids"],

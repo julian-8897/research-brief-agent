@@ -8,9 +8,17 @@ _RECENCY_PATTERNS = (
     re.compile(
         r"\b(?:latest|newest|recent|recently|currently|up[- ]to[- ]date)\b", re.I
     ),
-    re.compile(r"\bcurrent\s+(?:best|leading|top|landscape|state)\b", re.I),
+    re.compile(
+        r"\bcurrent\s+(?:best|leading|top|frontier|landscape|state|models?|"
+        r"products?|releases?|versions?|leaderboards?|benchmarks?|pricing)\b",
+        re.I,
+    ),
     re.compile(r"\bstate[- ]of[- ]the[- ]art\b", re.I),
-    re.compile(r"\bas\s+of\s+(?:today|now|\d{4})\b", re.I),
+    re.compile(
+        r"\bas\s+of\s+(?:today|now|(?:[a-z]+\s+)?\d{4}|"
+        r"\d{4}-\d{1,2}(?:-\d{1,2})?)\b",
+        re.I,
+    ),
 )
 
 ARXIV_RECENCY_CAVEAT = (

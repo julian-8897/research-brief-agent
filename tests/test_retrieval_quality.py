@@ -106,6 +106,13 @@ def test_recency_intent_detection_is_specific():
             constraints=["Use recent evidence"],
         )
     )
+    assert has_recency_intent(
+        BriefRequest(
+            research_question=(
+                "As of July 2026, which current frontier LLMs are strongest for coding?"
+            )
+        )
+    )
     assert not has_recency_intent(
         BriefRequest(
             research_question="How does electrical current density affect this model?"

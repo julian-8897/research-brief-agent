@@ -19,11 +19,19 @@ _Last updated: 2026-07-26_
   arXiv-only continuation.
 - [x] Preserved provider parity through the existing canonical tool layer and
   kept tests hermetic by clearing real Exa credentials.
+- [x] Expanded recency detection to dated phrases such as `as of July 2026` and
+  product language such as `current frontier`, without matching unrelated uses
+  such as electrical current density.
+- [x] Removed arXiv reading tools after web-only discovery and added a
+  tools-disabled retry when an OpenAI-compatible provider emits tool-call markup
+  instead of the final memo.
 
-**Verification:** `uv run pytest -q` → 184 passed; `ruff check` and
+**Verification:** `uv run pytest -q` → 185 passed; `ruff check` and
 `ruff format --check` clean; browser JavaScript syntax passed; the hermetic
-seven-case core quality gate passed. A live Exa call remains unverified because
-`EXA_API_KEY` is not configured locally.
+seven-case core quality gate passed. A live Quick run used one Exa call, returned
+five sources, cited four canonical web sources, produced no full-text errors,
+and completed in 27.2 s. Measured costs were $0.007 Exa and $0.00201 LLM; the
+Langfuse trace was emitted.
 
 ## Recency candidate-lane correction (2026-07-26)
 

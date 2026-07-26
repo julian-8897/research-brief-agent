@@ -1080,6 +1080,53 @@ def test_web_search_tool_is_hidden_for_non_recency_questions():
     assert "web_search" not in [spec.name for spec in toolset.specs]
 
 
+def test_web_only_run_does_not_offer_arxiv_read_tools_after_discovery():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_max_search_calls=1,
+        agent_search_auto_backfill=False,
+    )
+    tools = ResearchTools(
+        settings,
+        FakeArxivClient(),
+        FakeEmbedder(),
+        InMemoryVectorStore(embedding_dimension=2),
+        web_search=FakeWebSearch(),
+    )
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="web",
+                        name="web_search",
+                        arguments={"query": "latest coding models"},
+                    )
+                ]
+            },
+            {
+                "text": '<｜｜DSML｜｜tool_calls><invoke name="web_search">',
+            },
+            {
+                "text": "# Decision Memo\n\nCurrent evidence [web-1].",
+            },
+        ]
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    response = agent.run(
+        BriefRequest(research_question="What are the latest competitive coding models?")
+    )
+
+    assert provider.offered_tool_names[1] == []
+    assert provider.tool_choices[-1] == "none"
+    assert "DSML" not in response.final_brief
+    assert response.full_text_diagnostics.attempted == 0
+    assert response.full_text_diagnostics.failed == 0
+    assert [source.id for source in response.cited_web_sources] == ["web-1"]
+
+
 def test_web_search_failure_is_non_fatal_and_warned():
     settings = Settings(
         vector_store_backend="memory",

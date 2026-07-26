@@ -155,15 +155,20 @@ class ResearchBriefAgent:
                     messages.append(UserMessage(self._discovery_budget_nudge(toolset)))
                     yield self._discovery_budget_event(toolset)
                     discovery_budget_event_emitted = True
-                offered_tools = (
-                    toolset.full_text_specs
-                    if discovery_budget_reached and self._needs_full_text(toolset)
-                    else toolset.details_specs
-                    if discovery_budget_reached and toolset.fulltext_budget_reached
-                    else toolset.read_only_specs
-                    if discovery_budget_reached
-                    else toolset.specs
-                )
+                if discovery_budget_reached and toolset.retrieved_count == 0:
+                    # Web evidence already contains bounded highlights. Paper-reading
+                    # tools cannot resolve [web-N] ids and should not be offered.
+                    offered_tools = []
+                else:
+                    offered_tools = (
+                        toolset.full_text_specs
+                        if discovery_budget_reached and self._needs_full_text(toolset)
+                        else toolset.details_specs
+                        if discovery_budget_reached and toolset.fulltext_budget_reached
+                        else toolset.read_only_specs
+                        if discovery_budget_reached
+                        else toolset.specs
+                    )
                 offered_tool_names = {tool.name for tool in offered_tools}
                 turn_messages = self._messages_for_turn(messages)
                 turn = self._traced_llm_turn(
@@ -189,6 +194,20 @@ class ResearchBriefAgent:
                         messages.append(UserMessage(_FULL_TEXT_REQUIRED_NUDGE))
                         yield self._evidence_required_event(toolset)
                         continue
+                    if self._is_invalid_final_text(turn.text):
+                        warning = (
+                            "Provider returned tool-call markup instead of a memo; "
+                            "retrying final synthesis with tools disabled."
+                        )
+                        warnings.append(warning)
+                        yield self._warning_event(
+                            "invalid_synthesis_retry",
+                            warning,
+                        )
+                        final_text = self._force_final(
+                            trace, request, system, messages, usage, toolset
+                        )
+                        break
                     final_text = turn.text or ""
                     break
 
@@ -968,8 +987,9 @@ class ResearchBriefAgent:
                 + (
                     "Use web_search for current proprietary releases, prices, API "
                     "documentation, and live leaderboards; cite its exact [web-N] "
-                    "markers. Prefer primary sources and use arXiv for scientific "
-                    "claims. "
+                    "markers. Web source highlights are already available: never pass "
+                    "[web-N] ids to arXiv paper-reading tools. Prefer primary sources "
+                    "and use arXiv for scientific claims. "
                     if web_search_available
                     else "Freshness is limited to retrieved arXiv evidence, not a "
                     "complete view of proprietary releases, current prices, or live "
