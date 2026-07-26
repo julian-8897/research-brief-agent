@@ -53,6 +53,13 @@ class PaperVectorStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def search_ids(
+        self, query_embedding: np.ndarray, ids: list[str], k: int = 10
+    ) -> list[SearchResponseItem]:
+        """Score a bounded set of paper ids against a query embedding."""
+        raise NotImplementedError
+
+    @abstractmethod
     def existing_ids(self, ids: list[str]) -> set[str]:
         raise NotImplementedError
 
@@ -115,6 +122,25 @@ class InMemoryVectorStore(PaperVectorStore):
             for idx in top_indices
             if math.isfinite(float(scores[idx]))
         ]
+
+    def search_ids(
+        self, query_embedding: np.ndarray, ids: list[str], k: int = 10
+    ) -> list[SearchResponseItem]:
+        if self._vectors is None or not self._papers or not ids or k <= 0:
+            return []
+        requested = set(ids)
+        query = _normalize_rows(
+            np.asarray(query_embedding).reshape(1, -1).astype("float32")
+        )[0]
+        scored: list[SearchResponseItem] = []
+        for index, paper in enumerate(self._papers):
+            if paper.id not in requested:
+                continue
+            score = float(self._vectors[index] @ query)
+            if math.isfinite(score):
+                scored.append(SearchResponseItem(paper=paper, score=score))
+        scored.sort(key=lambda item: item.score, reverse=True)
+        return scored[:k]
 
     def existing_ids(self, ids: list[str]) -> set[str]:
         candidates = set(ids)
@@ -238,6 +264,37 @@ class QdrantPaperVectorStore(PaperVectorStore):
             for hit in hits
             if hit.payload
         ]
+
+    def search_ids(
+        self, query_embedding: np.ndarray, ids: list[str], k: int = 10
+    ) -> list[SearchResponseItem]:
+        self.ensure_collection()
+        requested = list(dict.fromkeys(paper_id for paper_id in ids if paper_id))
+        if not requested or k <= 0:
+            return []
+        points = self.client.retrieve(
+            collection_name=self.settings.qdrant_collection,
+            ids=[_point_id(paper_id) for paper_id in requested],
+            with_payload=True,
+            with_vectors=True,
+        )
+        query = _normalize_rows(np.asarray(query_embedding).reshape(1, -1))[0]
+        scored: list[SearchResponseItem] = []
+        for point in points:
+            payload = getattr(point, "payload", None)
+            vector = getattr(point, "vector", None)
+            if not payload or vector is None or isinstance(vector, dict):
+                continue
+            candidate = np.asarray(vector, dtype="float32").reshape(1, -1)
+            if candidate.shape[1] != query.shape[0]:
+                continue
+            score = float(_normalize_rows(candidate)[0] @ query)
+            if math.isfinite(score):
+                scored.append(
+                    SearchResponseItem(paper=PaperRecord(**payload), score=score)
+                )
+        scored.sort(key=lambda item: item.score, reverse=True)
+        return scored[:k]
 
     def existing_ids(self, ids: list[str]) -> set[str]:
         self.ensure_collection()

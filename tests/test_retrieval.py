@@ -52,9 +52,54 @@ def test_in_memory_vector_store_reports_existing_ids():
     assert store.existing_ids(["1", "2"]) == {"1"}
 
 
+def test_in_memory_vector_store_scores_requested_ids_outside_global_top_k():
+    store = InMemoryVectorStore(embedding_dimension=2)
+    store.upsert(
+        [
+            PaperRecord(id="leader", title="Leader", summary="leader"),
+            PaperRecord(id="fresh", title="Fresh", summary="fresh"),
+        ],
+        np.array([[1.0, 0.0], [0.5, 0.8660254]]),
+    )
+
+    global_results = store.search(np.array([1.0, 0.0]), k=1)
+    requested_results = store.search_ids(
+        np.array([1.0, 0.0]), ["fresh", "missing"], k=1
+    )
+
+    assert [item.paper.id for item in global_results] == ["leader"]
+    assert [item.paper.id for item in requested_results] == ["fresh"]
+    assert requested_results[0].score == pytest.approx(0.5)
+
+
 def test_qdrant_point_id_is_deterministic_uuid():
     assert _point_id("2401.00001") == _point_id("2401.00001")
     assert len(_point_id("2401.00001").split("-")) == 5
+
+
+def test_qdrant_vector_store_scores_requested_ids():
+    store = object.__new__(QdrantPaperVectorStore)
+    store.settings = Settings(
+        vector_store_backend="qdrant",
+        embedding_dimension=2,
+        qdrant_collection="arxiv_papers",
+    )
+    store._collection_validated = True
+    store.client = SimpleNamespace(
+        retrieve=lambda **_kwargs: [
+            SimpleNamespace(
+                payload=PaperRecord(
+                    id="fresh", title="Fresh", summary="fresh"
+                ).model_dump(mode="json"),
+                vector=[0.5, 0.8660254],
+            )
+        ]
+    )
+
+    results = store.search_ids(np.array([1.0, 0.0]), ["fresh"], k=1)
+
+    assert [item.paper.id for item in results] == ["fresh"]
+    assert results[0].score == pytest.approx(0.5)
 
 
 def test_qdrant_collection_schema_accepts_expected_vectors():

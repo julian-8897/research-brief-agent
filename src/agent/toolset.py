@@ -362,7 +362,12 @@ class ResearchToolset:
         embed_text = _build_search_embedding_text(
             self._request.research_question, query, self._request.constraints
         )
-        result = self._tools.vector_retrieve(query, k, embed_text=embed_text)
+        result = self._tools.vector_retrieve(
+            query,
+            k,
+            embed_text=embed_text,
+            include_ids=(self._recency_source_ids if self._recency_sensitive else None),
+        )
         self._corpus_size = result.diagnostics.corpus_size
         self._search_latency_ms += result.diagnostics.retrieval_latency_ms
         backfilled = 0
@@ -371,7 +376,14 @@ class ResearchToolset:
             backfilled = self._backfill_for_query(query)
             if backfilled or self._recency_sensitive:
                 self._backfilled_count += backfilled
-                result = self._tools.vector_retrieve(query, k, embed_text=embed_text)
+                result = self._tools.vector_retrieve(
+                    query,
+                    k,
+                    embed_text=embed_text,
+                    include_ids=(
+                        self._recency_source_ids if self._recency_sensitive else None
+                    ),
+                )
                 self._corpus_size = result.diagnostics.corpus_size
                 self._search_latency_ms += result.diagnostics.retrieval_latency_ms
         if self._recency_sensitive:
@@ -526,6 +538,9 @@ class ResearchToolset:
         self._remember_ranked_recency_ids(item.paper.id for item in recent_lane)
         result.items = mixed[:k]
         result.diagnostics.returned = len(result.items)
+        scores = [item.score for item in result.items]
+        result.diagnostics.min_score = min(scores) if scores else None
+        result.diagnostics.max_score = max(scores) if scores else None
         return result
 
     def _remember_recency_source_ids(self, paper_ids: Iterable[str]) -> None:

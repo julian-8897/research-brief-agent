@@ -4,6 +4,22 @@ Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-07-26_
 
+## Recency candidate-lane correction (2026-07-26)
+
+- [x] Added targeted cosine scoring by paper id to the in-memory and Qdrant
+  vector-store implementations.
+- [x] Freshly fetched arXiv papers are now scored independently of the global
+  semantic top-k and merged before the guarded recency/semantic interleave.
+- [x] The configured relevance floor still applies to fresh candidates; ordinary
+  non-recency retrieval is unchanged.
+- [x] Recomputed retrieval score diagnostics after the final interleave.
+- [x] Added a regression where every fresh paper ranks below the global top-k but
+  the strongest fresh candidate is still surfaced.
+
+**Verification:** `uv run pytest -q` → 177 passed; `ruff check` and
+`ruff format --check` clean; an in-memory Qdrant smoke test returned the requested
+out-of-top-k paper with the expected cosine score.
+
 ## User-selectable research depth (2026-07-26)
 
 - [x] Added `quick`, `balanced`, and `deep` request modes, defaulting to 1, 3,

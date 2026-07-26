@@ -279,6 +279,14 @@ class AsymmetricEmbedder:
         return np.array([[1.0, 0.0] for _ in texts])
 
 
+class WeakFreshPaperEmbedder(AsymmetricEmbedder):
+    """Scores newly embedded papers below the existing global top-k."""
+
+    def encode_documents(self, texts, batch_size=32):
+        self.document_texts.extend(texts)
+        return np.array([[0.5, 0.8660254] for _ in texts])
+
+
 def _backfill_toolset(tools: ResearchTools, question: str) -> ResearchToolset:
     return ResearchToolset(
         tools, BriefRequest(research_question=question, max_papers=5)
@@ -437,6 +445,47 @@ def test_recency_candidate_lane_preserves_scores_and_semantic_candidates():
         "fresh-1": 0.80,
         "fresh-2": 0.70,
     }
+
+
+def test_recency_backfill_includes_fresh_paper_outside_global_top_k():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        query_expansion_enabled=False,
+        search_backfill_query_expansion=False,
+        agent_search_auto_backfill=True,
+        agent_recency_candidate_fraction=0.5,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    store.upsert(
+        [
+            _paper("leader", "Semantic Leader"),
+            _paper("runner-up", "Semantic Runner-up"),
+        ],
+        np.array([[1.0, 0.0], [0.9, 0.4358899]]),
+    )
+    arxiv_client = RecordingArxivClient(paper_id="2607.09999")
+    tools = ResearchTools(
+        settings,
+        arxiv_client,
+        WeakFreshPaperEmbedder(),
+        store,
+    )
+    toolset = _backfill_toolset(
+        tools, "What are the latest competitive coding language models?"
+    )
+
+    content, meta = toolset._search_papers("coding model benchmarks", 2)
+    payload = json.loads(content)
+
+    assert store.search(np.array([1.0, 0.0]), k=2)[-1].paper.id == "runner-up"
+    assert [paper["id"] for paper in payload["papers"]] == [
+        "2607.09999",
+        "leader",
+    ]
+    assert payload["recency"]["recent_candidates"] == 1
+    assert meta["recent_candidates"] == 1
+    assert toolset.diagnostics().recent_candidates == 1
 
 
 def test_non_recency_search_keeps_semantic_ranking_even_when_lower_hit_is_newer():

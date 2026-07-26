@@ -29,7 +29,8 @@ To keep multi-turn runs from repeatedly paying for the same large evidence paylo
 Recency-sensitive questions use a separate guarded path. Terms such as `latest`,
 `recent`, and `state of the art` force one arXiv backfill ordered by submission
 date, even when a stale local vector hit clears the normal relevance floor. Fresh
-papers are admitted only if they also appear in the semantic candidate pool, then
+papers are scored directly by id, so global semantic top-k truncation cannot silently
+discard the fresh lane. Papers that clear the configured relevance floor are then
 interleaved with semantic leaders without changing their cosine scores. The response
 always warns that arXiv cannot provide a complete catalogue of proprietary releases,
 current prices, or live leaderboard results.

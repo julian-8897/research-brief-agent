@@ -58,7 +58,12 @@ class ResearchTools:
         )
 
     def vector_retrieve(
-        self, query: str, k: int, *, embed_text: str | None = None
+        self,
+        query: str,
+        k: int,
+        *,
+        embed_text: str | None = None,
+        include_ids: list[str] | None = None,
     ) -> RetrievalResult:
         started = time.perf_counter()
         query_embedding = self.embedder.encode_queries(
@@ -74,16 +79,37 @@ class ResearchTools:
                 ),
             )
         items = self.vector_store.search(query_embedding, k=candidate_k)
+        included_items = (
+            self.vector_store.search_ids(
+                query_embedding,
+                include_ids,
+                k=self.settings.max_retrieval_results,
+            )
+            if include_ids
+            else []
+        )
         if self.settings.retrieval_min_score > 0.0:
             items = [
                 item
                 for item in items
                 if item.score >= self.settings.retrieval_min_score
             ]
+            included_items = [
+                item
+                for item in included_items
+                if item.score >= self.settings.retrieval_min_score
+            ]
         if self.reranker is not None:
             items = self.reranker.rerank(query, items, top_k=k)
+            included_items = self.reranker.rerank(
+                query, included_items, top_k=len(included_items)
+            )
         else:
             items = items[:k]
+        returned_ids = {item.paper.id for item in items}
+        items.extend(
+            item for item in included_items if item.paper.id not in returned_ids
+        )
         latency_ms = (time.perf_counter() - started) * 1000
         scores = [item.score for item in items]
         try:
