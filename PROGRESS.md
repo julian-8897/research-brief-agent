@@ -4,6 +4,30 @@ Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-07-26_
 
+## Live local quality verification (2026-07-26)
+
+- [x] Verified the browser-facing service over HTTP with the embedded warm Qdrant
+  corpus: `/`, `/health`, and `/briefs/stream` all completed against the configured
+  live `deepseek-v4-flash` provider and Langfuse.
+- [x] Captured a complete decision memo for RAG versus fine-tuning on weekly-changing
+  support documents (run `f23b9c76b0e24fcba46e2b4282f06f73`, Langfuse trace
+  `345b6335061633c1277057e11abb0b05`): 8 papers retrieved, 3/3 full-text reads,
+  4 grounded citations, no warnings, 5 LLM turns, 5 tool calls, 26.6 s, 31.9k input
+  and 1.7k output tokens.
+- **Quality verdict: useful but caveated.** The memo gives a clear recommendation,
+  compares the requested trade-offs, and states the lack of a direct enterprise
+  benchmark. Its central paper claims match the source abstracts. It nevertheless
+  exceeds the requested 700-word limit (778 words), emits an incorrect date, and
+  includes unsourced latency, update-time, and cost estimates.
+- **A second quality failure remains reproducible.** The quantisation case
+  (run `a71b9aea3f244322b693b63ccba5c8c7`) returned grounded evidence and a useful
+  conditional recommendation, but exposed synthesis notes and ended mid-sentence
+  without a warning. Final-output truncation and preamble detection remain open.
+- **Shutdown lifecycle remains noisy.** Embedded Qdrant is not explicitly closed by
+  the FastAPI lifespan, and interpreter shutdown can emit a `QdrantClient.__del__`
+  exception. Persistence was unaffected in these tests, but the lifecycle should be
+  closed explicitly.
+
 ## Langfuse SDK compatibility (2026-07-26)
 
 - [x] Updated the tracing wrapper for the installed Langfuse 4 SDK while retaining
