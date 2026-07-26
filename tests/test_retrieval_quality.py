@@ -1,11 +1,16 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import arxiv
 import numpy as np
 
 from src.agent import ResearchTools
-from src.agent.recency import ARXIV_RECENCY_CAVEAT, has_recency_intent
+from src.agent.recency import (
+    ARXIV_RECENCY_CAVEAT,
+    build_current_web_query,
+    has_recency_intent,
+    recency_reference_date,
+)
 from src.agent.tools import RetrievalResult
 from src.agent.toolset import ResearchToolset, _build_search_embedding_text
 from src.llm import TurnResult
@@ -118,6 +123,35 @@ def test_recency_intent_detection_is_specific():
             research_question="How does electrical current density affect this model?"
         )
     )
+
+
+def test_current_web_query_replaces_stale_model_year_and_preserves_question():
+    request = BriefRequest(
+        research_question="Check the latest LLM models for coding capabilities."
+    )
+
+    query = build_current_web_query(
+        request,
+        "latest coding leaderboard 2025 SWE-bench",
+        today=date(2026, 7, 26),
+    )
+
+    assert query.startswith("Evidence current as of 2026-07-26.")
+    assert "Check the latest LLM models for coding capabilities." in query
+    assert "coding leaderboard 2026 SWE-bench" in query
+    assert "2025" not in query
+
+
+def test_explicit_recency_cutoff_overrides_current_date():
+    request = BriefRequest(research_question="Which coding model led as of July 2025?")
+
+    assert recency_reference_date(request, today=date(2026, 7, 26)) == "July 2025"
+    query = build_current_web_query(
+        request,
+        "coding leaderboard 2025",
+        today=date(2026, 7, 26),
+    )
+    assert query.startswith("Evidence current as of July 2025.")
 
 
 def test_search_papers_embeds_expanded_text_but_echoes_model_query():

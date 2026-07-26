@@ -929,6 +929,29 @@ def test_recency_prompt_forbids_unsupported_current_product_rankings():
     assert "Do not name or rank a current product unless" in prompt
 
 
+def test_recency_prompt_requires_dated_web_first_evidence_when_available():
+    settings = Settings(vector_store_backend="memory", embedding_dimension=2)
+    tools = ResearchTools(
+        settings,
+        FakeArxivClient(),
+        FakeEmbedder(),
+        _store_with_paper(),
+        web_search=FakeWebSearch(),
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=FailingProvider())
+
+    prompt = agent._system_prompt(
+        BriefRequest(
+            research_question="As of July 2026, which coding models are current?"
+        )
+    )
+
+    assert "effective evidence date is July 2026" in prompt
+    assert "first discovery action must be web_search" in prompt
+    assert "needs an immediate [web-N] citation" in prompt
+    assert "an arXiv citation cannot establish freshness" in prompt
+
+
 def test_recency_run_reports_arxiv_source_limit(monkeypatch):
     monkeypatch.setattr(
         "src.agent.toolset.fetch_arxiv_fulltext",
@@ -1057,7 +1080,13 @@ def test_recency_run_uses_bounded_web_evidence_and_separate_citations(monkeypatc
     )
 
     assert provider.offered_tool_names[0][0] == "web_search"
+    assert provider.offered_tool_names[0] == ["web_search"]
     assert web_search.calls[0]["max_results"] == 5
+    assert web_search.calls[0]["query"].startswith("Evidence current as of ")
+    assert (
+        "What are the latest competitive coding models?"
+        in (web_search.calls[0]["query"])
+    )
     assert "[web-1](https://openai.com/index/coding-model)" in response.final_brief
     assert "web-99" not in response.final_brief
     assert [source.id for source in response.cited_web_sources] == ["web-1"]
@@ -1095,6 +1124,161 @@ def test_web_search_tool_is_hidden_for_non_recency_questions():
     )
 
     assert "web_search" not in [spec.name for spec in toolset.specs]
+
+
+def test_recency_gate_blocks_arxiv_until_web_search_without_spending_budget():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_quick_search_calls=1,
+        agent_search_auto_backfill=False,
+    )
+    web_search = FakeWebSearch()
+    tools = ResearchTools(
+        settings,
+        FakeArxivClient(),
+        FakeEmbedder(),
+        _store_with_paper(),
+        web_search=web_search,
+    )
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="premature-paper",
+                        name="search_papers",
+                        arguments={"query": "coding models", "k": 1},
+                    )
+                ]
+            },
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="required-web",
+                        name="web_search",
+                        arguments={
+                            "query": "latest coding leaderboard 2025",
+                            "max_results": 5,
+                        },
+                    )
+                ]
+            },
+            {"text": "# Decision Memo\n\nCurrent evidence [web-1]."},
+        ]
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    events = list(
+        agent._iterate(
+            BriefRequest(
+                research_question="What are the latest competitive coding models?",
+                research_depth="quick",
+            )
+        )
+    )
+
+    assert provider.offered_tool_names[0] == ["web_search"]
+    assert provider.offered_tool_names[1] == ["web_search"]
+    assert any(
+        event.get("name") == "search_papers"
+        and event.get("blocked") is True
+        and event.get("reason") is None
+        for event in events
+        if event["event"] == "tool_result"
+    )
+    assert len(web_search.calls) == 1
+    assert "2025" not in web_search.calls[0]["query"]
+    assert "2026" in web_search.calls[0]["query"]
+    assert events[-1]["data"]["web_search_diagnostics"]["calls"] == 1
+
+
+def test_recency_final_without_web_citation_is_rejected_once():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_quick_search_calls=1,
+    )
+    tools = ResearchTools(
+        settings,
+        FakeArxivClient(),
+        FakeEmbedder(),
+        InMemoryVectorStore(embedding_dimension=2),
+        web_search=FakeWebSearch(),
+    )
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="web",
+                        name="web_search",
+                        arguments={"query": "latest coding models"},
+                    )
+                ]
+            },
+            {"text": "# Decision Memo\n\nA current model leads."},
+            {"text": "# Decision Memo\n\nThe retrieved ranking is current [web-1]."},
+        ]
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    events = list(
+        agent._iterate(
+            BriefRequest(
+                research_question="What are the latest competitive coding models?",
+                research_depth="quick",
+            )
+        )
+    )
+
+    assert any(
+        event.get("reason") == "current_web_citation_missing" for event in events
+    )
+    assert "[web-1]" in events[-1]["data"]["final_brief"]
+    assert provider.turns == 3
+
+
+def test_forced_recency_synthesis_without_web_citation_abstains():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_quick_search_calls=1,
+        agent_max_iterations=1,
+    )
+    tools = ResearchTools(
+        settings,
+        FakeArxivClient(),
+        FakeEmbedder(),
+        InMemoryVectorStore(embedding_dimension=2),
+        web_search=FakeWebSearch(),
+    )
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="web",
+                        name="web_search",
+                        arguments={"query": "latest coding models"},
+                    )
+                ]
+            },
+            {"text": "# Decision Memo\n\nAn uncited current model leads."},
+        ]
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    response = agent.run(
+        BriefRequest(
+            research_question="What are the latest competitive coding models?",
+            research_depth="quick",
+        )
+    )
+
+    assert "cannot be reported safely" in response.final_brief
+    assert "uncited current model leads" not in response.final_brief
+    assert response.cited_web_sources == []
 
 
 def test_web_only_run_does_not_offer_arxiv_read_tools_after_discovery():
@@ -1192,6 +1376,7 @@ def test_web_search_failure_is_non_fatal_and_warned():
     assert response["cited_web_sources"] == []
     assert any(event.get("code") == "web_search_failed" for event in events)
     assert not any(event["event"] == "error" for event in events)
+    assert "search_papers" in provider.offered_tool_names[1]
 
 
 def test_user_prompt_formats_constraints_as_binding_lines():

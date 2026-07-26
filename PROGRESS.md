@@ -30,8 +30,17 @@ _Last updated: 2026-07-26_
   separate web citations, result/failure counts and Exa cost.
 - [x] Langfuse `tool:web_search` observations now capture query arguments,
   parsed source output, returned count, Exa cost, latency and error metadata.
+- [x] Made Exa the mandatory first evidence stage for configured
+  recency-sensitive runs; arXiv tools unlock after a successful or failed web
+  attempt without letting a premature paper call consume the reserved slot.
+- [x] Anchored Exa queries to the effective evidence date and original question,
+  replacing stale model-generated years for current requests while respecting
+  explicit historical cutoffs.
+- [x] Reject current-model synthesis without a grounded `web-N` citation, retry
+  once through the normal loop, and safely abstain if forced synthesis remains
+  uncited.
 
-**Verification:** `uv run pytest -q` → 185 passed; `ruff check` and
+**Verification:** `uv run pytest -q` → 193 passed; `ruff check` and
 `ruff format --check` clean; browser JavaScript syntax passed; the hermetic
 seven-case core quality gate passed. A live Quick run used one Exa call, returned
 five sources, cited four canonical web sources, produced no full-text errors,
@@ -39,7 +48,10 @@ and completed in 27.2 s. Measured costs were $0.007 Exa and $0.00201 LLM; the
 Langfuse trace was emitted. A second live visibility run confirmed the UI stream
 reported `web_search_available: true` and Langfuse stored one
 `tool:web_search` span with the query, five parsed sources, $0.007 Exa cost and
-1.84 s tool latency.
+1.84 s tool latency. The exact previously stale question was re-run after the
+gate: Exa ran first with a 2026 query, a second targeted search retrieved current
+Claude Fable 5 and GPT-5.6 Sol evidence, and the final memo cited six web sources
+plus two full-text papers instead of relying on Claude 3.5-era literature.
 
 ## Recency candidate-lane correction (2026-07-26)
 

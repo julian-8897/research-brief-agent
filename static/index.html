@@ -1675,8 +1675,13 @@ Track latency, cost, and operational risks.</textarea>
         if (eventData.event === "started") {
           const depth = eventData.research_depth || "balanced";
           const budget = eventData.discovery_budget ?? "-";
-          const web = eventData.web_search_available ? "web evidence available" : "arXiv evidence";
-          return `${eventData.message || "Run started."}\n${depth} depth; up to ${budget} discovery calls; ${web}.`;
+          const evidenceDate = eventData.evidence_date ? `; evidence date ${eventData.evidence_date}` : "";
+          const web = eventData.web_search_required
+            ? "web evidence required first"
+            : eventData.web_search_available
+              ? "web evidence available"
+              : "arXiv evidence";
+          return `${eventData.message || "Run started."}\n${depth} depth; up to ${budget} discovery calls; ${web}${evidenceDate}.`;
         }
         if (eventData.event === "llm_turn") {
           const tools = eventData.tools_requested && eventData.tools_requested.length

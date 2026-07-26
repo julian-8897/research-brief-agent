@@ -7,6 +7,7 @@ from src.agent.recency import (
     ARXIV_RECENCY_CAVEAT,
     WEB_RECENCY_CAVEAT,
     has_recency_intent,
+    recency_reference_date,
 )
 from src.agent.tools import ResearchTools
 from src.agent.toolset import (
@@ -45,6 +46,17 @@ _FULL_TEXT_REQUIRED_NUDGE = (
     "Final synthesis is blocked because you have retrieved papers but have not "
     "successfully read full text yet. Call get_full_text on the most relevant "
     "retrieved paper ids, then write the memo."
+)
+_CURRENT_WEB_REQUIRED_NUDGE = (
+    "This is a recency-sensitive request. Before using arXiv or writing the memo, "
+    "call web_search once for current official release or live benchmark evidence. "
+    "Use the effective evidence date supplied in the system prompt."
+)
+_CURRENT_WEB_CITATION_NUDGE = (
+    "The draft contains no grounded web citation. Rewrite it so every current model, "
+    "release, score, price, or ranking claim is immediately supported by an exact "
+    "[web-N] citation. If the retrieved web evidence does not directly support a "
+    "claim, omit it and state the evidence gap."
 )
 _PROGRAMMER_ERRORS = (AssertionError, IndexError, KeyError, TypeError, ValueError)
 _BRIEF_TITLES = {
@@ -119,6 +131,12 @@ class ResearchBriefAgent:
             "web_search_available": bool(
                 has_recency_intent(request) and self.tools.web_search is not None
             ),
+            "web_search_required": bool(
+                has_recency_intent(request) and self.tools.web_search is not None
+            ),
+            "evidence_date": (
+                recency_reference_date(request) if has_recency_intent(request) else None
+            ),
         }
 
         if self.llm is None:
@@ -189,6 +207,17 @@ class ResearchBriefAgent:
                 messages.append(AssistantMessage(turn.text, turn.tool_calls))
 
                 if not turn.tool_calls:
+                    if (
+                        toolset.web_search_required
+                        and discovery_calls < discovery_budget
+                    ):
+                        messages.append(UserMessage(_CURRENT_WEB_REQUIRED_NUDGE))
+                        yield {
+                            "event": "evidence_required",
+                            "reason": "current_web_missing",
+                            "message": _CURRENT_WEB_REQUIRED_NUDGE,
+                        }
+                        continue
                     if self._needs_full_text(toolset):
                         discovery_budget_reached = True
                         messages.append(UserMessage(_FULL_TEXT_REQUIRED_NUDGE))
@@ -208,16 +237,35 @@ class ResearchBriefAgent:
                             trace, request, system, messages, usage, toolset
                         )
                         break
+                    if (
+                        toolset.web_search_succeeded
+                        and not toolset.has_grounded_web_citation(turn.text or "")
+                    ):
+                        messages.append(UserMessage(_CURRENT_WEB_CITATION_NUDGE))
+                        yield {
+                            "event": "evidence_required",
+                            "reason": "current_web_citation_missing",
+                            "message": _CURRENT_WEB_CITATION_NUDGE,
+                            "candidate_ids": toolset.web_source_ids(),
+                        }
+                        continue
                     final_text = turn.text or ""
                     break
 
                 results: list[ToolResult] = []
                 for call in turn.tool_calls:
                     is_discovery_call = call.name in _DISCOVERY_TOOLS
+                    tool_unavailable = call.name not in offered_tool_names
                     discovery_call_blocked = (
-                        is_discovery_call and discovery_calls >= discovery_budget
+                        is_discovery_call
+                        and not tool_unavailable
+                        and discovery_calls >= discovery_budget
                     )
-                    if is_discovery_call and not discovery_call_blocked:
+                    if (
+                        is_discovery_call
+                        and not tool_unavailable
+                        and not discovery_call_blocked
+                    ):
                         discovery_calls += 1
                     yield {
                         "event": "tool_call",
@@ -237,7 +285,7 @@ class ResearchBriefAgent:
                             "blocked": True,
                             "reason": "discovery_budget_exhausted",
                         }
-                    elif call.name not in offered_tool_names:
+                    elif tool_unavailable:
                         content = json.dumps(
                             {
                                 "error": "tool not available",
@@ -709,6 +757,11 @@ class ResearchBriefAgent:
             system + f"\n\nYou have reached your tool budget. Write the final "
             f"{_BRIEF_TITLES[request.brief_type].lower()} now using only the evidence "
             "already gathered. Do not call any tools."
+            + (
+                f" {_CURRENT_WEB_CITATION_NUDGE}"
+                if toolset.web_search_succeeded
+                else ""
+            )
         )
         turn = self._traced_llm_turn(
             trace,
@@ -722,12 +775,33 @@ class ResearchBriefAgent:
         self._accumulate(usage, turn)
         messages.append(AssistantMessage(turn.text, turn.tool_calls))
         if not self._is_invalid_final_text(turn.text):
+            if toolset.web_search_succeeded and not toolset.has_grounded_web_citation(
+                turn.text or ""
+            ):
+                return self._safe_current_evidence_abstention(request)
             return turn.text or ""
 
         brief, _fallback_usage = self._fallback_brief(request, toolset.retrieved_items)
         return (
             brief + "\n\nOperational note: forced synthesis returned tool-call markup, "
             "so this deterministic fallback was used."
+        )
+
+    @staticmethod
+    def _safe_current_evidence_abstention(request: BriefRequest) -> str:
+        title = _BRIEF_TITLES[request.brief_type]
+        return (
+            f"# {title}\n\n"
+            "## Recommendation / Synthesis\n\n"
+            "A current product ranking cannot be reported safely because the final "
+            "synthesis did not attach retrieved web evidence to its current-model "
+            "claims.\n\n"
+            "## Evidence Gap\n\n"
+            "Treat the available run as incomplete. Re-run with a larger discovery "
+            "budget or narrower question, and require direct official-release or live "
+            "benchmark evidence for every model, score, price, and ranking.\n\n"
+            "## Next Step\n\n"
+            "Do not make a model-selection decision from uncited model memory."
         )
 
     @staticmethod
@@ -992,14 +1066,19 @@ class ResearchBriefAgent:
         )
         recency_instruction = ""
         if has_recency_intent(request):
+            reference_date = recency_reference_date(request)
             recency_instruction = (
-                "- This is a recency-sensitive request. "
+                f"- This is a recency-sensitive request. The effective evidence "
+                f"date is {reference_date}. "
                 + (
-                    "Use web_search for current proprietary releases, prices, API "
-                    "documentation, and live leaderboards; cite its exact [web-N] "
-                    "markers. Web source highlights are already available: never pass "
-                    "[web-N] ids to arXiv paper-reading tools. Prefer primary sources "
-                    "and use arXiv for scientific claims. "
+                    "Your first discovery action must be web_search for current "
+                    "proprietary releases, prices, API documentation, or live "
+                    "leaderboards. Cite its exact [web-N] markers. Every current "
+                    "model, release, score, price, or ranking claim needs an immediate "
+                    "[web-N] citation; an arXiv citation cannot establish freshness. "
+                    "Web source highlights are already available: never pass [web-N] "
+                    "ids to arXiv paper-reading tools. Prefer primary sources and use "
+                    "arXiv for scientific claims. "
                     if web_search_available
                     else "Freshness is limited to retrieved arXiv evidence, not a "
                     "complete view of proprietary releases, current prices, or live "

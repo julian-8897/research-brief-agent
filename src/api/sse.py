@@ -10,16 +10,7 @@ SSE_EVENT_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
     "tool_call": frozenset({"event", "name", "arguments"}),
     "tool_result": frozenset({"event", "name"}),
     "discovery_budget_reached": frozenset({"event", "reason", "message"}),
-    "evidence_required": frozenset(
-        {
-            "event",
-            "reason",
-            "required_full_text_papers",
-            "full_text_fetched",
-            "candidate_ids",
-            "message",
-        }
-    ),
+    "evidence_required": frozenset({"event", "reason", "message"}),
     "warning": frozenset({"event", "code", "message"}),
     "degraded": frozenset({"event", "reason", "message"}),
     "error": frozenset({"event", "stage", "message", "type"}),
@@ -38,6 +29,16 @@ def validate_sse_event(event: dict[str, Any]) -> dict[str, Any]:
     if required is None:
         raise ValueError(f"Unknown SSE event type: {event_type}")
     missing = sorted(required - event.keys())
+    if event_type == "evidence_required":
+        reason_required = {
+            "full_text_missing": {
+                "required_full_text_papers",
+                "full_text_fetched",
+                "candidate_ids",
+            },
+            "current_web_citation_missing": {"candidate_ids"},
+        }.get(event.get("reason"), set())
+        missing = sorted(set(missing) | (reason_required - event.keys()))
     if missing:
         raise ValueError(
             f"SSE event '{event_type}' missing required fields: {', '.join(missing)}"

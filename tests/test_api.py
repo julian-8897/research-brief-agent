@@ -484,6 +484,40 @@ def test_sse_event_contract_rejects_missing_required_fields():
         validate_sse_event({"event": "started"})
 
 
+def test_sse_event_contract_accepts_current_web_evidence_reasons():
+    missing_search = {
+        "event": "evidence_required",
+        "reason": "current_web_missing",
+        "message": "search current web evidence",
+    }
+    missing_citation = {
+        "event": "evidence_required",
+        "reason": "current_web_citation_missing",
+        "message": "cite current web evidence",
+        "candidate_ids": ["web-1"],
+    }
+
+    assert validate_sse_event(missing_search) == missing_search
+    assert validate_sse_event(missing_citation) == missing_citation
+
+
+def test_sse_event_contract_keeps_full_text_reason_strict():
+    with pytest.raises(
+        ValueError,
+        match=(
+            "missing required fields: candidate_ids, full_text_fetched, "
+            "required_full_text_papers"
+        ),
+    ):
+        validate_sse_event(
+            {
+                "event": "evidence_required",
+                "reason": "full_text_missing",
+                "message": "read full text",
+            }
+        )
+
+
 def test_stream_brief_endpoint_events_match_sse_contract():
     with _client() as client:
         response = client.post(
