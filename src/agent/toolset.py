@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from src.agent.query_expansion import TurnObserver, expand_arxiv_query
+from src.agent.recency import ARXIV_RECENCY_CAVEAT, has_recency_intent
 from src.agent.tools import ResearchTools, RetrievalResult
 from src.ingestion import FullTextFetchError, fetch_arxiv_fulltext
 from src.llm import ToolCall, ToolSpec
@@ -100,6 +102,10 @@ class ResearchToolset:
         self._tools = tools
         self._request = request
         self._on_llm_turn = on_llm_turn
+        self._recency_sensitive = has_recency_intent(request)
+        self._recency_backfill_attempted = False
+        self._recency_source_ids: list[str] = []
+        self._recency_ranked_ids: list[str] = []
         self._retrieved: dict[str, SearchResponseItem] = {}
         self._ingested_ids: set[str] = set()
         # Search queries already auto-backfilled this run, so a repeated search
@@ -360,13 +366,16 @@ class ResearchToolset:
         self._corpus_size = result.diagnostics.corpus_size
         self._search_latency_ms += result.diagnostics.retrieval_latency_ms
         backfilled = 0
-        if self._should_backfill(query, result):
+        backfill_attempted = self._should_backfill(query, result)
+        if backfill_attempted:
             backfilled = self._backfill_for_query(query)
-            if backfilled:
+            if backfilled or self._recency_sensitive:
                 self._backfilled_count += backfilled
                 result = self._tools.vector_retrieve(query, k, embed_text=embed_text)
                 self._corpus_size = result.diagnostics.corpus_size
                 self._search_latency_ms += result.diagnostics.retrieval_latency_ms
+        if self._recency_sensitive:
+            result = self._mix_recency_candidates(result, k)
         self._max_requested_k = max(self._max_requested_k, k)
         for item in result.items:
             self._retrieved[item.paper.id] = item
@@ -376,6 +385,17 @@ class ResearchToolset:
                 "title": item.paper.title,
                 "score": round(item.score, 4),
                 "abstract": item.paper.summary[:_ABSTRACT_SNIPPET].strip(),
+                **(
+                    {
+                        "published": (
+                            item.paper.published.date().isoformat()
+                            if item.paper.published
+                            else None
+                        )
+                    }
+                    if self._recency_sensitive
+                    else {}
+                ),
             }
             for item in result.items
         ]
@@ -387,6 +407,14 @@ class ResearchToolset:
         }
         if backfilled:
             body["backfilled"] = backfilled
+        if self._recency_sensitive:
+            body["recency"] = {
+                "requested": True,
+                "backfill_attempted": self._recency_backfill_attempted,
+                "freshness_source": "arxiv",
+                "recent_candidates": len(self._recency_ranked_ids),
+                "caveat": ARXIV_RECENCY_CAVEAT,
+            }
         if not papers:
             body["hint"] = (
                 "No indexed papers cleared the relevance threshold. "
@@ -399,6 +427,14 @@ class ResearchToolset:
         }
         if backfilled:
             meta["backfilled"] = backfilled
+        if self._recency_sensitive:
+            meta.update(
+                {
+                    "recency_sensitive": True,
+                    "recency_backfill_attempted": self._recency_backfill_attempted,
+                    "recent_candidates": len(self._recency_ranked_ids),
+                }
+            )
         return json.dumps(body), meta
 
     def _should_backfill(self, query: str, result: RetrievalResult) -> bool:
@@ -413,6 +449,12 @@ class ResearchToolset:
         settings = self._tools.settings
         if not settings.agent_search_auto_backfill:
             return False
+        if (
+            self._recency_sensitive
+            and settings.agent_recency_auto_backfill
+            and not self._recency_backfill_attempted
+        ):
+            return True
         if query.casefold() in self._backfilled_queries:
             return False
         best = result.items[0].score if result.items else None
@@ -426,29 +468,92 @@ class ResearchToolset:
         """
         settings = self._tools.settings
         self._backfilled_queries.add(query.casefold())
+        if self._recency_sensitive:
+            self._recency_backfill_attempted = True
         arxiv_query, _expanded = expand_arxiv_query(
             query,
             self._tools.llm if settings.search_backfill_query_expansion else None,
             enabled=settings.search_backfill_query_expansion,
-            max_words=settings.query_expansion_max_words,
+            max_words=(
+                settings.agent_recency_query_expansion_max_words
+                if self._recency_sensitive
+                else settings.query_expansion_max_words
+            ),
             on_turn=self._on_llm_turn,
         )
         try:
-            new_count, _papers = self._tools.fetch_and_ingest(
+            fetch_kwargs: dict[str, Any] = {"date_range": self._request.date_range}
+            if self._recency_sensitive:
+                fetch_kwargs["sort"] = "submitted_date"
+            new_count, papers = self._tools.fetch_and_ingest(
                 arxiv_query,
                 settings.search_backfill_max_papers,
-                date_range=self._request.date_range,
+                **fetch_kwargs,
             )
         except Exception:
             return 0
+        if self._recency_sensitive:
+            self._remember_recency_source_ids(paper.id for paper in papers)
         return new_count
+
+    def _mix_recency_candidates(
+        self, result: RetrievalResult, k: int
+    ) -> RetrievalResult:
+        """Interleave fresh-query papers with semantic leaders without changing scores."""
+        source_ids = set(self._recency_source_ids)
+        fresh = [item for item in result.items if item.paper.id in source_ids]
+        if not fresh:
+            return result
+        fraction = min(
+            1.0, max(0.0, self._tools.settings.agent_recency_candidate_fraction)
+        )
+        if fraction == 0.0:
+            return result
+        recent_slots = min(len(fresh), max(1, math.ceil(k * fraction)))
+        recent_lane = fresh[:recent_slots]
+        recent_ids = {item.paper.id for item in recent_lane}
+        semantic_lane = [
+            item for item in result.items if item.paper.id not in recent_ids
+        ]
+        mixed: list[SearchResponseItem] = []
+        for index in range(max(len(recent_lane), len(semantic_lane))):
+            if index < len(recent_lane):
+                mixed.append(recent_lane[index])
+            if index < len(semantic_lane):
+                mixed.append(semantic_lane[index])
+            if len(mixed) >= k:
+                break
+        self._remember_ranked_recency_ids(item.paper.id for item in recent_lane)
+        result.items = mixed[:k]
+        result.diagnostics.returned = len(result.items)
+        return result
+
+    def _remember_recency_source_ids(self, paper_ids: Iterable[str]) -> None:
+        seen = set(self._recency_source_ids)
+        for paper_id in paper_ids:
+            if paper_id not in seen:
+                seen.add(paper_id)
+                self._recency_source_ids.append(paper_id)
+
+    def _remember_ranked_recency_ids(self, paper_ids: Iterable[str]) -> None:
+        seen = set(self._recency_ranked_ids)
+        for paper_id in paper_ids:
+            if paper_id not in seen:
+                seen.add(paper_id)
+                self._recency_ranked_ids.append(paper_id)
 
     def _fetch_arxiv(self, query: str, max_results: int) -> tuple[str, dict[str, Any]]:
         if not query:
             return json.dumps({"error": "query is required"}), {"new": 0}
+        fetch_kwargs: dict[str, Any] = {"date_range": self._request.date_range}
+        if self._recency_sensitive:
+            fetch_kwargs["sort"] = "submitted_date"
         _ingested, papers = self._tools.fetch_and_ingest(
-            query, max_results, date_range=self._request.date_range
+            query, max_results, **fetch_kwargs
         )
+        if self._recency_sensitive:
+            self._recency_backfill_attempted = True
+            self._remember_recency_source_ids(paper.id for paper in papers)
         new = [paper for paper in papers if paper.id not in self._ingested_ids]
         self._ingested_ids.update(paper.id for paper in papers)
         already_known = len(papers) - len(new)
@@ -655,11 +760,30 @@ class ResearchToolset:
     @property
     def retrieved_items(self) -> list[SearchResponseItem]:
         items = list(self._retrieved.values())
+        if self._recency_sensitive and self._recency_ranked_ids:
+            priority = {
+                paper_id: index
+                for index, paper_id in enumerate(self._recency_ranked_ids)
+            }
+            recent = [item for item in items if item.paper.id in priority]
+            recent.sort(key=lambda item: priority[item.paper.id])
+            recent_ids = {item.paper.id for item in recent}
+            remaining = [item for item in items if item.paper.id not in recent_ids]
+            remaining.sort(key=lambda item: item.score, reverse=True)
+            return [*recent, *remaining]
         items.sort(key=lambda item: item.score, reverse=True)
         return items
 
     def candidate_ids(self, limit: int = 5) -> list[str]:
         return [item.paper.id for item in self.retrieved_items[:limit]]
+
+    @property
+    def recency_sensitive(self) -> bool:
+        return self._recency_sensitive
+
+    @property
+    def recency_backfill_attempted(self) -> bool:
+        return self._recency_backfill_attempted
 
     def cited_papers(self, brief_text: str) -> list[CitedPaper]:
         """Papers whose id appears in the final brief, falling back to all retrieved."""
@@ -744,6 +868,10 @@ class ResearchToolset:
             max_score=max(scores) if scores else None,
             backfilled=self._backfilled_count,
             corpus_size=self._corpus_size,
+            recency_sensitive=self._recency_sensitive,
+            recency_backfill_attempted=self._recency_backfill_attempted,
+            recent_candidates=len(self._recency_ranked_ids),
+            freshness_source="arxiv" if self._recency_sensitive else None,
         )
 
     def fulltext_diagnostics(self) -> FullTextDiagnostics:

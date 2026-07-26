@@ -1,12 +1,20 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import arxiv
 import numpy as np
 
 from src.agent import ResearchTools
+from src.agent.recency import ARXIV_RECENCY_CAVEAT, has_recency_intent
+from src.agent.tools import RetrievalResult
 from src.agent.toolset import ResearchToolset, _build_search_embedding_text
 from src.llm import TurnResult
-from src.models import BriefRequest, PaperRecord
+from src.models import (
+    BriefRequest,
+    PaperRecord,
+    RetrievalDiagnostics,
+    SearchResponseItem,
+)
 from src.retrieval import InMemoryVectorStore
 from src.settings import Settings
 
@@ -34,10 +42,12 @@ class RecordingEmbedder:
 class RecordingArxivClient:
     def __init__(self, paper_id: str = "2501.00001"):
         self.calls: list[tuple[str, int]] = []
+        self.sorts = []
         self.paper_id = paper_id
 
     def search_papers(self, query, max_results, sort_by=None):
         self.calls.append((query, max_results))
+        self.sorts.append(sort_by)
         return [
             {
                 "id": self.paper_id,
@@ -84,6 +94,23 @@ def test_build_search_embedding_text_includes_descriptive_request_context():
     assert "learning maps between function spaces" in text
     assert "Search focus: neural operators" in text
     assert "prefer methods with public baselines" in text
+
+
+def test_recency_intent_detection_is_specific():
+    assert has_recency_intent(
+        BriefRequest(research_question="What are the latest coding models?")
+    )
+    assert has_recency_intent(
+        BriefRequest(
+            research_question="Which coding model is strongest?",
+            constraints=["Use recent evidence"],
+        )
+    )
+    assert not has_recency_intent(
+        BriefRequest(
+            research_question="How does electrical current density affect this model?"
+        )
+    )
 
 
 def test_search_papers_embeds_expanded_text_but_echoes_model_query():
@@ -304,6 +331,114 @@ def test_search_papers_skips_backfill_when_local_hit_is_strong():
     assert [p["id"] for p in payload["papers"]] == ["local"]
 
 
+def test_recency_search_forces_one_submitted_date_backfill_despite_strong_hit():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        query_expansion_enabled=False,
+        search_backfill_query_expansion=False,
+        agent_search_auto_backfill=True,
+        agent_search_backfill_min_score=0.75,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    store.upsert([_paper("local", "Local Strong")], np.array([[1.0, 0.0]]))
+    arxiv_client = RecordingArxivClient(paper_id="2607.00001")
+    tools = ResearchTools(settings, arxiv_client, RecordingEmbedder(), store)
+    toolset = _backfill_toolset(
+        tools, "What are the latest competitive coding language models?"
+    )
+
+    first_content, first_meta = toolset._search_papers("coding model benchmarks", 2)
+    toolset._search_papers("software engineering model benchmarks", 2)
+    first_payload = json.loads(first_content)
+
+    assert arxiv_client.calls == [("all:coding model benchmarks", 25)]
+    assert arxiv_client.sorts == [arxiv.SortCriterion.SubmittedDate]
+    assert first_payload["recency"]["backfill_attempted"] is True
+    assert first_payload["recency"]["freshness_source"] == "arxiv"
+    assert first_payload["recency"]["caveat"] == ARXIV_RECENCY_CAVEAT
+    assert first_meta["recency_sensitive"] is True
+    assert toolset.diagnostics().recency_backfill_attempted is True
+    assert toolset.diagnostics().freshness_source == "arxiv"
+
+
+def test_recency_backfill_compacts_long_descriptive_query_for_arxiv():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        search_backfill_query_expansion=True,
+        query_expansion_max_words=12,
+        agent_recency_query_expansion_max_words=60,
+    )
+    store = InMemoryVectorStore(embedding_dimension=2)
+    arxiv_client = RecordingArxivClient(paper_id="2607.00002")
+    provider = FakeProvider("coding models AND (SWE-bench OR LiveCodeBench)")
+    tools = ResearchTools(
+        settings,
+        arxiv_client,
+        RecordingEmbedder(),
+        store,
+        llm=provider,
+    )
+    toolset = _backfill_toolset(
+        tools, "What are the latest competitive coding language models?"
+    )
+    long_query = (
+        "State of the art language models for repository level code generation "
+        "evaluated on SWE-bench and LiveCodeBench"
+    )
+
+    toolset._search_papers(long_query, 5)
+
+    assert arxiv_client.calls[0][0] == (
+        "all:coding models AND (SWE-bench OR LiveCodeBench)"
+    )
+    assert arxiv_client.sorts[0] == arxiv.SortCriterion.SubmittedDate
+
+
+def test_recency_candidate_lane_preserves_scores_and_semantic_candidates():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        agent_recency_candidate_fraction=0.5,
+    )
+    tools = ResearchTools(
+        settings,
+        object(),
+        RecordingEmbedder(),
+        InMemoryVectorStore(embedding_dimension=2),
+    )
+    toolset = _backfill_toolset(tools, "What are the newest coding models?")
+    toolset._remember_recency_source_ids(["fresh-1", "fresh-2"])
+    items = [
+        SearchResponseItem(paper=_paper("semantic", "Semantic Leader"), score=0.99),
+        SearchResponseItem(paper=_paper("fresh-1", "Fresh One"), score=0.80),
+        SearchResponseItem(paper=_paper("fresh-2", "Fresh Two"), score=0.70),
+    ]
+    result = RetrievalResult(
+        items=items,
+        diagnostics=RetrievalDiagnostics(
+            query="coding models",
+            requested_k=3,
+            returned=3,
+            retrieval_latency_ms=1.0,
+        ),
+    )
+
+    mixed = toolset._mix_recency_candidates(result, 3)
+
+    assert [item.paper.id for item in mixed.items] == [
+        "fresh-1",
+        "semantic",
+        "fresh-2",
+    ]
+    assert {item.paper.id: item.score for item in mixed.items} == {
+        "semantic": 0.99,
+        "fresh-1": 0.80,
+        "fresh-2": 0.70,
+    }
+
+
 def test_non_recency_search_keeps_semantic_ranking_even_when_lower_hit_is_newer():
     settings = Settings(
         vector_store_backend="memory",
@@ -317,13 +452,13 @@ def test_non_recency_search_keeps_semantic_ranking_even_when_lower_hit_is_newer(
                 id="older-strong",
                 title="Semantically Strong",
                 summary="abstract",
-                published=datetime(2020, 1, 1, tzinfo=timezone.utc),
+                published=datetime(2020, 1, 1, tzinfo=UTC),
             ),
             PaperRecord(
                 id="newer-weak",
                 title="Recent but Weaker",
                 summary="abstract",
-                published=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                published=datetime(2026, 1, 1, tzinfo=UTC),
             ),
         ],
         np.array([[1.0, 0.0], [0.8, 0.6]]),

@@ -26,6 +26,14 @@ The agent exposes four tools to the model: `search_papers` (semantic retrieval o
 
 To keep multi-turn runs from repeatedly paying for the same large evidence payloads, the agent compacts older tool results before each provider call. The newest tool result is kept raw for one turn, then older search/detail/full-text payloads are replaced with IDs, titles, errors, and bounded excerpts while preserving the provider-required tool-call/tool-result transcript shape.
 
+Recency-sensitive questions use a separate guarded path. Terms such as `latest`,
+`recent`, and `state of the art` force one arXiv backfill ordered by submission
+date, even when a stale local vector hit clears the normal relevance floor. Fresh
+papers are admitted only if they also appear in the semantic candidate pool, then
+interleaved with semantic leaders without changing their cosine scores. The response
+always warns that arXiv cannot provide a complete catalogue of proprietary releases,
+current prices, or live leaderboard results.
+
 ## Public API
 
 - `POST /briefs/stream` streams agent events and the final cited brief.

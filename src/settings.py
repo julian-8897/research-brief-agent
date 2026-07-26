@@ -116,6 +116,15 @@ class Settings:
     agent_search_backfill_min_score: float = _float_env(
         "AGENT_SEARCH_BACKFILL_MIN_SCORE", 0.72
     )
+    # Recency-sensitive questions require a fresh retrieval lane even when a
+    # semantically similar but stale local paper clears the generic score floor.
+    agent_recency_auto_backfill: bool = _bool_env("AGENT_RECENCY_AUTO_BACKFILL", True)
+    agent_recency_candidate_fraction: float = _float_env(
+        "AGENT_RECENCY_CANDIDATE_FRACTION", 0.5
+    )
+    agent_recency_query_expansion_max_words: int = _int_env(
+        "AGENT_RECENCY_QUERY_EXPANSION_MAX_WORDS", 60
+    )
 
     # Transcript compaction: each provider turn must include the prior
     # tool-call/tool-result pairs, but older bulky payloads can be replaced with

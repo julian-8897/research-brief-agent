@@ -75,6 +75,10 @@ class RetrievalDiagnostics(BaseModel):
     max_score: float | None = None
     backfilled: int = 0
     corpus_size: int | None = None
+    recency_sensitive: bool = False
+    recency_backfill_attempted: bool = False
+    recent_candidates: int = 0
+    freshness_source: str | None = None
 
 
 class FullTextDiagnostics(BaseModel):

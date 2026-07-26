@@ -4,6 +4,26 @@ Living status tracker for Research Brief Agent. Update this as work lands.
 
 _Last updated: 2026-07-26_
 
+## Recency-aware retrieval (2026-07-26)
+
+- [x] Added deterministic recency-intent detection across the question, domain,
+  and constraints.
+- [x] Recency-sensitive searches force one arXiv backfill ordered by submission
+  date even when a stale local hit clears the normal semantic-score floor.
+- [x] Long descriptive model queries are compacted into keyword/Boolean arXiv
+  queries for the fresh backfill.
+- [x] Fresh-query papers must still clear semantic retrieval; a bounded lane
+  interleaves them with semantic leaders without modifying cosine scores.
+- [x] Ordinary non-recency queries retain their original score-only ordering,
+  pinned by a pre-change regression test.
+- [x] Tool results, diagnostics, warnings, and the system prompt disclose that
+  arXiv is not a complete source for proprietary releases, prices, or live
+  leaderboard rankings.
+
+**Verification:** pre-change non-recency regression passed and was committed
+separately; `uv run pytest -q` → 172 passed; `ruff check` and
+`ruff format --check` clean; browser JavaScript syntax passed.
+
 ## System prompt hardening (2026-07-26)
 
 - [x] Reduced the system prompt from 307 to 250 words while retaining the

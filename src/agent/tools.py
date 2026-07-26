@@ -110,6 +110,7 @@ class ResearchTools:
         date_range=None,
         *,
         refresh_existing: bool = False,
+        sort: str | None = None,
     ):
         """Fetch fresh arXiv metadata for a model-supplied query and index it.
 
@@ -121,7 +122,7 @@ class ResearchTools:
             query=query,
             max_papers=min(max_papers, self.settings.max_ingest_results),
             date_range=date_range,
-            sort=self.settings.arxiv_sort,
+            sort=sort or self.settings.arxiv_sort,
         )
         return (
             self.ingest_papers(papers, refresh_existing=refresh_existing),

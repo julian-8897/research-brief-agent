@@ -745,6 +745,86 @@ def test_system_prompt_uses_runtime_budgets_and_strict_evidence_contract():
     assert "at most TWO discovery rounds" not in prompt
 
 
+def test_recency_prompt_forbids_unsupported_current_product_rankings():
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        anthropic_api_key=None,
+        openai_api_key=None,
+    )
+    tools = ResearchTools(
+        settings, FakeArxivClient(), FakeEmbedder(), _store_with_paper()
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=FailingProvider())
+
+    prompt = agent._system_prompt(
+        BriefRequest(research_question="What are the latest competitive coding models?")
+    )
+
+    assert "recency-sensitive request" in prompt
+    assert "not a complete view of proprietary releases" in prompt
+    assert "Do not name or rank a current product unless" in prompt
+
+
+def test_recency_run_reports_arxiv_source_limit(monkeypatch):
+    monkeypatch.setattr(
+        "src.agent.toolset.fetch_arxiv_fulltext",
+        lambda pdf_url, *, timeout, char_budget, **kwargs: ("FULL BODY TEXT", False),
+    )
+    settings = Settings(
+        vector_store_backend="memory",
+        embedding_dimension=2,
+        anthropic_api_key=None,
+        openai_api_key=None,
+        agent_search_auto_backfill=False,
+    )
+    tools = ResearchTools(
+        settings, FakeArxivClient(), FakeEmbedder(), _store_with_paper()
+    )
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="search",
+                        name="search_papers",
+                        arguments={"query": "coding model benchmarks", "k": 1},
+                    )
+                ]
+            },
+            {
+                "tool_calls": [
+                    ToolCall(
+                        id="fulltext",
+                        name="get_full_text",
+                        arguments={"paper_ids": ["2401.00001"]},
+                    )
+                ]
+            },
+            {
+                "text": (
+                    "# Decision Memo\n\nThe retrieved evidence does not support a "
+                    "current product ranking [2401.00001]."
+                )
+            },
+        ]
+    )
+    agent = ResearchBriefAgent(settings, tools, Tracer(settings), llm=provider)
+
+    response = agent.run(
+        BriefRequest(
+            research_question="What are the latest competitive coding models?",
+            max_papers=1,
+        )
+    )
+
+    assert any(
+        "limited to papers discoverable on arXiv" in w for w in response.warnings
+    )
+    assert response.retrieval_diagnostics.recency_sensitive is True
+    assert response.retrieval_diagnostics.recency_backfill_attempted is False
+
+
 def test_user_prompt_formats_constraints_as_binding_lines():
     request = BriefRequest(
         research_question="Compare two retrieval strategies for scientific briefs.",

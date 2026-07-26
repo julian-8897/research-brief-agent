@@ -3,6 +3,7 @@ import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
+from src.agent.recency import ARXIV_RECENCY_CAVEAT, has_recency_intent
 from src.agent.tools import ResearchTools
 from src.agent.toolset import (
     ResearchToolset,
@@ -312,6 +313,13 @@ class ResearchBriefAgent:
                 warning,
                 retrieved=toolset.retrieved_count,
                 requested=request.max_papers,
+            )
+        if toolset.recency_sensitive:
+            warnings.append(ARXIV_RECENCY_CAVEAT)
+            yield self._warning_event(
+                "arxiv_recency_limit",
+                ARXIV_RECENCY_CAVEAT,
+                backfill_attempted=toolset.recency_backfill_attempted,
             )
         self._finalise_usage(usage)
         response = BriefResponse(
@@ -856,6 +864,14 @@ class ResearchBriefAgent:
             if full_text_budget
             else "- No full-text reads are available. State this evidence limitation.\n"
         )
+        recency_instruction = (
+            "- This is a recency-sensitive request. Freshness is limited to retrieved "
+            "arXiv evidence, not a complete view of proprietary releases, current "
+            "prices, or live leaderboards. Do not name or rank a current product unless "
+            "retrieved evidence directly evaluates it; otherwise state the gap.\n"
+            if has_recency_intent(request)
+            else ""
+        )
         return (
             "You are an evidence-grounded research agent for AI/ML and scientific-ML "
             "engineering decisions. Investigate the question with the available tools, "
@@ -875,7 +891,8 @@ class ResearchBriefAgent:
             "it inline using the exact surfaced arXiv id, e.g. [2401.00001].\n"
             "- Never cite or assert facts from memory. Clearly label synthesis or "
             "inference, and state when evidence is absent, indirect, conflicting, or "
-            "too weak for a firm conclusion.\n\n"
+            "too weak for a firm conclusion.\n"
+            f"{recency_instruction}\n"
             "Output:\n"
             f"- Return only a complete Markdown document beginning `# {brief_title}`. "
             "Do not include process commentary or a date unless the user supplied one.\n"
